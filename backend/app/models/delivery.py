@@ -97,6 +97,9 @@ class Project(Base):
     account = relationship("Account", back_populates="projects")
     allocations = relationship("ResourceAllocation", back_populates="project", cascade="all, delete-orphan")
     weekly_statuses = relationship("WeeklyStatus", back_populates="project")
+    tasks = relationship("Task", back_populates="project", cascade="all, delete-orphan")
+    brd_documents = relationship("BRDDocument", back_populates="project", cascade="all, delete-orphan")
+    brd_artifacts = relationship("BRDDesignArtifact", back_populates="project", cascade="all, delete-orphan")
 
 
 class ResourceAllocation(Base):

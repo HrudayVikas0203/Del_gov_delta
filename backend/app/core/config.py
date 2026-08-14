@@ -60,6 +60,15 @@ class Settings(BaseSettings):
     report_output_dir: str = "backend/storage/reports"
     report_templates_dir: str = "backend/storage/report_templates"
 
+    seed_demo_data: bool = True
+
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_use_tls: bool = True
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    from_email: str | None = None
+
     @computed_field
     @property
     def database_url(self) -> str:

@@ -94,7 +94,7 @@ export interface WeeklyStatus {
     supportRequired?: string;
     comments?: string;
     // New fields
-    frequency?: 'Daily' | 'Weekly';
+    frequency?: 'Daily' | 'Weekly' | 'Monthly';
     dateStr?: string; // Calendar Date for Daily status
     account?: string;
     project?: string;
@@ -108,7 +108,7 @@ export interface WeeklyStatus {
     attachmentsSimulated?: string[]; // simulate only
 
     // Enterprise-specific additions
-    reportingFrequency?: 'Daily' | 'Weekly';
+    reportingFrequency?: 'Daily' | 'Weekly' | 'Monthly';
     weekNumber?: string;
     weekStartDate?: string;
     weekEndDate?: string;
@@ -182,6 +182,8 @@ export interface ReportTemplate {
   name: string;
   file_path: string;
   file_type: 'pptx' | 'pdf';
+  account_id?: string | null;
+  project_id?: string | null;
   uploaded_by_id?: string;
   uploaded_at: string;
 }
@@ -224,4 +226,83 @@ export interface ResourceAllocation {
   allocationPercent: number;
   reportingManager: string;
   projectStatus: 'Active' | 'Inactive';
+}
+
+export type TaskStatus = 'todo' | 'in_progress' | 'review' | 'blocked' | 'done';
+export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
+
+export interface DeliveryTask {
+  id: string;
+  project_id: string;
+  project_name?: string | null;
+  title: string;
+  description?: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignee_id?: string | null;
+  assignee_name?: string | null;
+  assignee_ids?: string[];
+  reporter_id?: string | null;
+  due_date?: string | null;
+  estimate_hours: number;
+  actual_hours: number;
+  labels: string[];
+  tags?: string[];
+  checklist?: Array<Record<string, unknown> | string>;
+  blocker_reason?: string | null;
+  rejection_reason?: string | null;
+  submitted_for_review_at?: string | null;
+  approved_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskComment {
+  id: string;
+  task_id: string;
+  author_id?: string | null;
+  body: string;
+  created_at: string;
+  author_name?: string | null;
+}
+
+export interface BRDDocument {
+  id: string;
+  project_id: string;
+  project_name?: string | null;
+  filename: string;
+  document_type: string;
+  storage_path?: string | null;
+  content_type?: string | null;
+  size_bytes: number;
+  status: 'uploaded' | 'processing' | 'ready' | 'failed';
+  uploaded_by_id?: string | null;
+  uploaded_at: string;
+}
+
+export interface BRDRequirementSet {
+  id: string;
+  document_id: string;
+  project_id: string;
+  version: number;
+  overview?: string | null;
+  functional: Array<Record<string, unknown> | string>;
+  non_functional: Array<Record<string, unknown> | string>;
+  assumptions: Array<Record<string, unknown> | string>;
+  created_by: string;
+  created_at: string;
+}
+
+export interface BRDArtifact {
+  id: string;
+  project_id: string;
+  document_id?: string | null;
+  artifact_type: 'business_flow' | 'architecture' | 'database_design';
+  version: number;
+  title: string;
+  payload: Record<string, unknown>;
+  ai_provider?: string | null;
+  model_used?: string | null;
+  created_by_id?: string | null;
+  created_at: string;
 }

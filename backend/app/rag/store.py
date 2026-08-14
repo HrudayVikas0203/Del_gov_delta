@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.config import resolve_app_path
 from app.models.delivery import Account, Project
 from app.models.status import WeeklyStatus
 
@@ -12,19 +13,30 @@ from app.models.status import WeeklyStatus
 class HashEmbeddingFunction:
     """Small deterministic embedding fallback; swap with a managed embedding API in production."""
 
+    def name(self) -> str:
+        return "delivery-governance-hash-embedding"
+
+    def _embed_one(self, text: str) -> list[float]:
+        digest = hashlib.sha256(text.encode("utf-8")).digest()
+        return [((byte / 255.0) * 2) - 1 for byte in digest] * 12
+
     def __call__(self, input: list[str]) -> list[list[float]]:
-        vectors: list[list[float]] = []
-        for text in input:
-            digest = hashlib.sha256(text.encode("utf-8")).digest()
-            vectors.append([((byte / 255.0) * 2) - 1 for byte in digest] * 12)
-        return vectors
+        return [self._embed_one(text) for text in input]
+
+    def embed_query(self, input: str | list[str]) -> list[float] | list[list[float]]:
+        if isinstance(input, list):
+            return self(input)
+        return self._embed_one(input)
+
+    def embed_documents(self, input: list[str]) -> list[list[float]]:
+        return self(input)
 
 
 def collection():
     import chromadb
 
     settings = get_settings()
-    client = chromadb.PersistentClient(path=settings.chroma_persist_directory)
+    client = chromadb.PersistentClient(path=str(resolve_app_path(settings.chroma_persist_directory)))
     return client.get_or_create_collection(name=settings.chroma_collection, embedding_function=HashEmbeddingFunction())
 
 

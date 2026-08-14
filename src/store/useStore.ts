@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Employee, Account, Project, WeeklyStatus, ResourceAllocation, AuditLog, AIInsight, GeneratedReport, NotificationItem, AppSettings } from '../types';
-import * as api from '../services/api';
 
 interface AppState {
   isAuthenticated: boolean;
@@ -24,7 +23,7 @@ interface AppState {
   setPreviewRole: (role: 'employee' | 'manager' | 'project_director' | 'studio_head') => void;
   submitWeeklyStatus: (statusId: string, fields: WeeklyStatus['fields']) => void;
   saveDraftStatus: (statusId: string, fields: WeeklyStatus['fields']) => void;
-  addNewWeeklyStatus: (employeeId: string, weekKeyStr: string, weekLabelStr: string, frequency?: 'Daily' | 'Weekly') => void;
+  addNewWeeklyStatus: (employeeId: string, weekKeyStr: string, weekLabelStr: string, frequency?: 'Daily' | 'Weekly' | 'Monthly') => void;
   approveStatus: (statusId: string, comment: string) => void;
   rejectStatus: (statusId: string, comment: string, isChangesRequested?: boolean) => void;
   addAuditLog: (userId: string, userName: string, action: string, module: string, details: string) => void;
@@ -96,8 +95,6 @@ const defaultSettings: AppSettings = {
   darkMode: false,
 };
 
-const initialAllocations: ResourceAllocation[] = [];
-
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
@@ -117,7 +114,7 @@ export const useStore = create<AppState>()(
       notifications: defaultNotifications,
       settings: defaultSettings,
 
-      setCurrentUser: (user: Employee) => set((state) => {
+      setCurrentUser: (user: Employee) => set(() => {
         const role = user.roleCategory === 'Studio Head' ? 'studio_head'
           : (user.roleCategory === 'Manager' || user.roleCategory === 'Program Manager') ? 'manager'
           : 'employee';
@@ -129,7 +126,7 @@ export const useStore = create<AppState>()(
         };
       }),
 
-      login: (email: string, token: string | null = null) => set((state) => {
+      login: (_email: string, token: string | null = null) => set((state) => {
         // Now login is handled via API in Login.tsx and setCurrentUser is called
         return { isAuthenticated: !!token, authToken: token ?? state.authToken };
       }),

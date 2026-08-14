@@ -60,6 +60,7 @@ def _status_rows(db: Session, report: GeneratedReport, projects: list[Project]) 
     employee_id = _scope_value(report.scope, "employee")
     project_id = _scope_value(report.scope, "project")
     account_id = _scope_value(report.scope, "account")
+    period = _scope_value(report.scope, "period")
 
     if employee_id:
         query = query.filter(WeeklyStatus.employee_id == employee_id)
@@ -69,7 +70,16 @@ def _status_rows(db: Session, report: GeneratedReport, projects: list[Project]) 
         project_ids = [project.id for project in projects]
         if project_ids:
             query = query.filter(WeeklyStatus.project_id.in_(project_ids))
-    return query.order_by(WeeklyStatus.week_start.desc()).limit(60).all()
+    rows = query.order_by(WeeklyStatus.week_start.desc()).limit(120).all()
+    if period:
+        labels = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}
+        expected = labels.get(period.lower())
+        if expected:
+            rows = [
+                row for row in rows
+                if str(row.fields.get("reportingFrequency") or row.fields.get("frequency") or "Weekly") == expected
+            ]
+    return rows[:60]
 
 
 def _text(value: object | None, fallback: str = "Not reported") -> str:
@@ -191,6 +201,7 @@ def _llm_summary(report: GeneratedReport, projects: list[Project], statuses: lis
     status_digest = "\n".join(
         f"- {_text(status.fields.get('project'), 'Project')} | {status.week_start} | {status.status.value} | "
         f"health={_text(status.fields.get('overallStatus'), 'Green')} | complete={status.fields.get('completionPercent') or 0}% | "
+        f"period={_text(status.fields.get('reportingFrequency') or status.fields.get('frequency'), 'Weekly')} | "
         f"update={_short(status.fields.get('achievements'), 140)} | blocker={_short(status.fields.get('blockers'), 100, 'None')}"
         for status in statuses[:16]
     )
@@ -201,7 +212,7 @@ def _llm_summary(report: GeneratedReport, projects: list[Project], statuses: lis
         "Structure the copy as three concise labeled lines: Delivery position, Risk posture, Leadership actions. "
         "Make the language executive, specific, and analytical. Avoid filler, apologies, markdown, asterisks, and generic phrases such as risks and challenges. "
         "Do not describe contributor status updates as separate projects; if there is one project, say one project with multiple contributors.\n\n"
-        f"Report title: {report.title}\nScope: {report.scope}\n"
+        f"Report title: {report.title}\nScope: {report.scope}\nRequested period filter: {_scope_value(report.scope, 'period') or 'all'}\n"
         f"Project count: {metrics['project_count']}\nStatus update count: {metrics['status_count']}\n"
         f"Average completion: {metrics['avg_completion']}%\nBlocker/red item count: {metrics['blocker_count']}\n"
         f"Health distribution: {metrics['health_counts']}\n"
@@ -285,7 +296,7 @@ def _generate_ppt(path: Path, report: GeneratedReport, projects: list[Project], 
     _set_slide_title(table_slide, "Team Status Detail")
     rows = max(min(len(statuses), 8) + 1, 2)
     table = table_slide.shapes.add_table(rows, 6, Inches(0.25), Inches(1.05), Inches(9.5), Inches(4.9)).table
-    headers = ["Person", "Project", "Period", "Health", "Complete", "Key Update"]
+    headers = ["Person", "Project", "Cycle", "Health", "Complete", "Key Update"]
     for idx, header in enumerate(headers):
         cell = table.cell(0, idx)
         cell.text = header
@@ -300,7 +311,7 @@ def _generate_ppt(path: Path, report: GeneratedReport, projects: list[Project], 
         values = [
             employee.name if employee else "-",
             project.name if project else _short(status.fields.get("project"), 24, "-"),
-            status.week_start.strftime("%d %b %Y"),
+            f"{_text(status.fields.get('reportingFrequency') or status.fields.get('frequency'), 'Weekly')} / {status.week_start.strftime('%d %b %Y')}",
             _text(status.fields.get("overallStatus"), status.status.value),
             f"{status.fields.get('completionPercent') or 0}%",
             _short(status.fields.get("achievements"), 90, "No narrative submitted"),
@@ -351,10 +362,10 @@ def _generate_pdf(path: Path, report: GeneratedReport, projects: list[Project], 
 
     if statuses:
         story.extend([Spacer(1, 18), Paragraph("Status Details", styles["Heading2"])])
-        status_data = [["Person", "Period", "Status", "Health", "Key Update"]]
+        status_data = [["Person", "Cycle", "Status", "Health", "Key Update"]]
         for status in statuses[:14]:
             employee = db.get(Employee, status.employee_id)
-            status_data.append([employee.name if employee else "-", status.week_start.strftime("%d %b %Y"), status.status.value, _text(status.fields.get("overallStatus"), "-"), _short(status.fields.get("achievements"), 95, "No update")])
+            status_data.append([employee.name if employee else "-", f"{_text(status.fields.get('reportingFrequency') or status.fields.get('frequency'), 'Weekly')} / {status.week_start.strftime('%d %b %Y')}", status.status.value, _text(status.fields.get("overallStatus"), "-"), _short(status.fields.get("achievements"), 95, "No update")])
         status_table = Table(status_data, repeatRows=1)
         status_table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2563EB")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white), ("GRID", (0, 0), (-1, -1), 0.25, colors.grey), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
         story.append(status_table)
@@ -387,11 +398,11 @@ def _generate_xlsx(path: Path, report: GeneratedReport, projects: list[Project],
     for col in ws.columns:
         ws.column_dimensions[col[0].column_letter].width = 18
     status_ws = wb.create_sheet("Status Details")
-    status_ws.append(["Employee", "Project", "Week Start", "Submission Status", "Health", "Completion", "Hours", "Achievements", "Blockers", "Risks", "Next Plan"])
+    status_ws.append(["Employee", "Project", "Reporting Cycle", "Period Start", "Submission Status", "Health", "Completion", "Hours", "Achievements", "Blockers", "Risks", "Next Plan"])
     for status in statuses:
         employee = db.get(Employee, status.employee_id)
         project = db.get(Project, status.project_id) if status.project_id else None
-        status_ws.append([employee.name if employee else "-", project.name if project else _text(status.fields.get("project"), "-"), status.week_start.isoformat(), status.status.value, _text(status.fields.get("overallStatus"), "-"), status.fields.get("completionPercent") or 0, status.fields.get("hoursWorked") or 0, _text(status.fields.get("achievements"), ""), _text(status.fields.get("blockers"), ""), _text(status.fields.get("risks"), ""), _text(status.fields.get("nextWeekPlan"), "")])
+        status_ws.append([employee.name if employee else "-", project.name if project else _text(status.fields.get("project"), "-"), _text(status.fields.get("reportingFrequency") or status.fields.get("frequency"), "Weekly"), status.week_start.isoformat(), status.status.value, _text(status.fields.get("overallStatus"), "-"), status.fields.get("completionPercent") or 0, status.fields.get("hoursWorked") or 0, _text(status.fields.get("achievements"), ""), _text(status.fields.get("blockers"), ""), _text(status.fields.get("risks"), ""), _text(status.fields.get("nextWeekPlan"), "")])
     for col in status_ws.columns:
         status_ws.column_dimensions[col[0].column_letter].width = 22
     wb.save(path)

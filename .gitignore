@@ -41,6 +41,7 @@ __pycache__/
 # Databases and Local Storage
 *.db
 *.sqlite3
+backend/storage/
 backend/storage/reports/
 backend/backend/storage/reports/
-
+.codex-source-repos/

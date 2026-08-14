@@ -79,7 +79,7 @@ export default function WeeklyStatus() {
   const [comments, setComments] = useState('');
 
   // Extended form states
-  const [frequency, setFrequency] = useState<'Daily' | 'Weekly'>('Weekly');
+  const [frequency, setFrequency] = useState<'Daily' | 'Weekly' | 'Monthly'>('Weekly');
   const [dateStr, setDateStr] = useState('');
   const [account, setAccount] = useState('');
   const [project, setProject] = useState('');
@@ -96,7 +96,7 @@ export default function WeeklyStatus() {
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
-  const [modalFrequency, setModalFrequency] = useState<'Daily' | 'Weekly'>('Weekly');
+  const [modalFrequency, setModalFrequency] = useState<'Daily' | 'Weekly' | 'Monthly'>('Weekly');
   const [modalWeekNumber, setModalWeekNumber] = useState('');
   const [modalWeekStartDate, setModalWeekStartDate] = useState('');
   const [modalWeekEndDate, setModalWeekEndDate] = useState('');
@@ -313,16 +313,16 @@ export default function WeeklyStatus() {
     let weekKey = '';
     let weekLabel = '';
     
-    if (modalFrequency === 'Weekly') {
+    if (modalFrequency === 'Weekly' || modalFrequency === 'Monthly') {
       if (!modalWeekStartDate || !modalWeekEndDate) {
-        showFeedback('error', 'Please enter both week start and end dates.');
+        showFeedback('error', `Please enter both ${modalFrequency.toLowerCase()} start and end dates.`);
         return;
       }
       weekKey = modalWeekStartDate;
       const startD = new Date(modalWeekStartDate);
       const endD = new Date(modalWeekEndDate);
       const formatDay = (d: Date) => d.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
-      weekLabel = `${formatDay(startD)} - ${formatDay(endD)} ${endD.getFullYear()} (${modalWeekNumber || 'Weekly'})`;
+      weekLabel = `${formatDay(startD)} - ${formatDay(endD)} ${endD.getFullYear()} (${modalWeekNumber || modalFrequency})`;
     } else {
       if (!modalCurrentDate) {
         showFeedback('error', 'Please enter a date for daily status.');
@@ -594,6 +594,7 @@ export default function WeeklyStatus() {
                   <option value="All">All Freq</option>
                   <option value="Weekly">Weekly</option>
                   <option value="Daily">Daily</option>
+                  <option value="Monthly">Monthly</option>
                 </select>
               </div>
               <div>
@@ -782,12 +783,13 @@ export default function WeeklyStatus() {
                       >
                         <option value="Weekly">Weekly Status</option>
                         <option value="Daily">Daily Status</option>
+                        <option value="Monthly">Monthly Status</option>
                       </select>
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold text-ink-soft uppercase tracking-wider mb-1">
-                        {frequency === 'Daily' ? 'Calendar Date' : 'Week Period'}
+                        {frequency === 'Daily' ? 'Calendar Date' : `${frequency} Period`}
                       </label>
                       <input
                         type="text"
@@ -1164,7 +1166,7 @@ export default function WeeklyStatus() {
                     <select
                       value={modalFrequency}
                       onChange={(e) => {
-                        setModalFrequency(e.target.value as 'Daily' | 'Weekly');
+                        setModalFrequency(e.target.value as 'Daily' | 'Weekly' | 'Monthly');
                         if (e.target.value === 'Daily') {
                           setModalCurrentDate(new Date().toISOString().split('T')[0]);
                         }
@@ -1173,10 +1175,11 @@ export default function WeeklyStatus() {
                     >
                       <option value="Weekly">Weekly Status</option>
                       <option value="Daily">Daily Status</option>
+                      <option value="Monthly">Monthly Status</option>
                     </select>
                   </div>
 
-                  {modalFrequency === 'Weekly' ? (
+                  {modalFrequency !== 'Daily' ? (
                     <>
                       <div>
                         <label className="block font-bold text-ink-soft uppercase mb-1">Week Number / Sprint</label>

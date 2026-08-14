@@ -1,5 +1,5 @@
 from fastapi import HTTPException, status
-from sqlalchemy import func, select, exc
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import ROLE_RANK
@@ -29,14 +29,21 @@ def create_allocation(db: Session, payload: AllocationCreate, actor: Employee) -
     if ROLE_RANK[actor.role] <= ROLE_RANK[employee.role]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Allocator must be senior to the allocated employee")
 
-    active_percent = db.scalar(
-        select(func.coalesce(func.sum(ResourceAllocation.allocation_percent), 0)).where(
+    existing = db.scalar(
+        select(ResourceAllocation).where(
+            ResourceAllocation.project_id == payload.project_id,
             ResourceAllocation.employee_id == payload.employee_id,
-            ResourceAllocation.end_date.is_(None),
         )
     )
-    if int(active_percent) + payload.allocation_percent > 100:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Employee allocation cannot exceed 100 percent")
+    if existing:
+        data = payload.model_dump()
+        for key, value in data.items():
+            setattr(existing, key, value)
+        employee.availability = Availability.ALLOCATED
+        audit(db, actor.id, "Resource Allocation Updated", "Allocation", f"{employee.name} allocation updated for {project.name}")
+        db.commit()
+        db.refresh(existing)
+        return existing
 
     allocation = ResourceAllocation(**payload.model_dump(), created_by_id=actor.id)
     employee.availability = Availability.ALLOCATED

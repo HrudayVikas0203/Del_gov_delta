@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { 
   FolderKanban, Search, TrendingUp, Users, ChevronDown, ChevronUp, 
-  Plus, Trash2, Calendar, DollarSign
+  Plus, Trash2, Calendar, DollarSign, ClipboardList
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import type { Employee } from '../types';
+import { apiCreateTask, apiListTasks } from '../services/api';
+import type { DeliveryTask, Employee, TaskPriority } from '../types';
 
 type AllocationRoleKey = 'program' | 'projectManager' | 'architect' | 'developer' | 'qa' | 'devops' | 'intern';
 
@@ -43,8 +44,7 @@ export default function Projects() {
   const [phaseFilter, setPhaseFilter] = useState('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Tabs for Studio Head View: 'portfolio' | 'allocations'
-  const [studioTab, setStudioTab] = useState<'portfolio' | 'allocations'>('portfolio');
+  const [projectTab, setProjectTab] = useState<'portfolio' | 'allocations' | 'tasks'>('portfolio');
 
   // Form states for creating project
   const [isCreateProjOpen, setIsCreateProjOpen] = useState(false);
@@ -69,6 +69,13 @@ export default function Projects() {
   const [allocStatus, setAllocStatus] = useState<'Active' | 'Inactive'>('Active');
 
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [projectTasks, setProjectTasks] = useState<DeliveryTask[]>([]);
+  const [taskProjectId, setTaskProjectId] = useState('');
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDescription, setTaskDescription] = useState('');
+  const [taskAssigneeId, setTaskAssigneeId] = useState('');
+  const [taskPriority, setTaskPriority] = useState<TaskPriority>('medium');
+  const [taskDueDate, setTaskDueDate] = useState('');
 
   const showFeedback = (type: 'success' | 'error', message: string) => {
     setFeedback({ type, message });
@@ -147,13 +154,14 @@ export default function Projects() {
 
   const toggleAllocationSelection = (roleKey: AllocationRoleKey, employeeId: string) => {
     setAllocationSelections((current) => {
-      const selected = current[roleKey];
-      return {
-        ...current,
-        [roleKey]: selected.includes(employeeId)
-          ? selected.filter((id) => id !== employeeId)
-          : [...selected, employeeId],
-      };
+      const wasSelected = current[roleKey].includes(employeeId);
+      const next = Object.fromEntries(
+        Object.entries(current).map(([key, ids]) => [key, ids.filter((id) => id !== employeeId)]),
+      ) as Record<AllocationRoleKey, string[]>;
+      if (!wasSelected) {
+        next[roleKey] = [...next[roleKey], employeeId];
+      }
+      return next;
     });
   };
 
@@ -168,8 +176,9 @@ export default function Projects() {
     const selectedAssignments = allocationRoleGroups.flatMap((group) =>
       allocationSelections[group.key].map((employeeId) => ({ group, employeeId })),
     );
+    const uniqueAssignments = [...new Map(selectedAssignments.map((item) => [item.employeeId, item])).values()];
 
-    if (selectedAssignments.length === 0) {
+    if (uniqueAssignments.length === 0) {
       showFeedback('error', 'Please select at least one person from a role dropdown.');
       return;
     }
@@ -184,7 +193,7 @@ export default function Projects() {
       const { apiCreateAllocation } = await import('../services/api');
       let allocatedCount = 0;
       const newAllocations = [];
-      for (const { group, employeeId } of selectedAssignments) {
+      for (const { group, employeeId } of uniqueAssignments) {
         const emp = employees.find(e => e.id === employeeId);
         if (!emp) continue;
         
@@ -210,7 +219,7 @@ export default function Projects() {
           employeeId: employeeId,
           employeeName: created.employee_name || emp.name,
           designation: created.employee_title || emp.title,
-          department: created.department || emp.department,
+          department: created.department || emp.dept,
           email: created.employee_email || emp.email,
           projectRole: created.allocation_role,
           allocationDate: created.start_date,
@@ -221,8 +230,12 @@ export default function Projects() {
         allocatedCount++;
       }
       
-      setAllocations([...allocations, ...newAllocations]);
-      showFeedback('success', `Allocated ${allocatedCount} team member${allocatedCount === 1 ? '' : 's'} to ${proj.name}.`);
+      const updatedAllocationKeys = new Set(newAllocations.map((allocation) => `${allocation.projectId}:${allocation.employeeId}`));
+      setAllocations([
+        ...allocations.filter((allocation) => !updatedAllocationKeys.has(`${allocation.projectId}:${allocation.employeeId}`)),
+        ...newAllocations,
+      ]);
+      showFeedback('success', `Allocated or updated ${allocatedCount} team member${allocatedCount === 1 ? '' : 's'} to ${proj.name}.`);
       setIsAllocateOpen(false);
       setAllocProjId('');
       setAllocationSelections(emptyAllocationSelections());
@@ -273,6 +286,76 @@ export default function Projects() {
 
   const activeFilteredProjects = getFilteredProjects();
   const phases = Array.from(new Set(projects.map(p => p.phase)));
+  const selectedTaskProject = projects.find((project) => project.id === taskProjectId);
+  const taskProjectTeam = taskProjectId
+    ? allocations
+      .filter((allocation) => {
+        const role = String(allocation.projectRole).toLowerCase();
+        return allocation.projectId === taskProjectId && !role.includes('manager') && !role.includes('architect');
+      })
+      .map((allocation) => employees.find((employee) => employee.id === allocation.employeeId))
+      .filter(Boolean) as Employee[]
+    : [];
+  const canCreateProjectTasks = Boolean(
+    currentUser && taskProjectId && (
+      currentUser.roleCategory === 'Studio Head' ||
+      currentUser.roleCategory === 'Program Manager' ||
+      selectedTaskProject?.managerId === currentUser.id ||
+      allocations.some((allocation) =>
+        allocation.projectId === taskProjectId &&
+        allocation.employeeId === currentUser.id &&
+        String(allocation.projectRole).toLowerCase().includes('architect')
+      )
+    )
+  );
+
+  useEffect(() => {
+    if (!authToken) return;
+    apiListTasks(authToken, taskProjectId ? { projectId: taskProjectId } : {})
+      .then((tasks) => setProjectTasks(tasks.filter((task) => !taskProjectId || task.project_id === taskProjectId)))
+      .catch((error) => showFeedback('error', error instanceof Error ? error.message : 'Unable to load project tasks.'));
+  }, [authToken, taskProjectId]);
+
+  useEffect(() => {
+    if (!taskProjectId && activeFilteredProjects.length > 0) {
+      setTaskProjectId(activeFilteredProjects[0].id);
+    }
+  }, [activeFilteredProjects, taskProjectId]);
+
+  const handleProjectTaskSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!authToken || !taskProjectId) return;
+    if (!canCreateProjectTasks) {
+      showFeedback('error', 'Only the project manager, program manager, studio head, or allocated technical architect can create project tasks.');
+      return;
+    }
+    if (!taskAssigneeId) {
+      showFeedback('error', 'Select an allocated team member before creating a task.');
+      return;
+    }
+    try {
+      const created = await apiCreateTask({
+        project_id: taskProjectId,
+        title: taskTitle,
+        description: taskDescription,
+        assignee_id: taskAssigneeId,
+        assignee_ids: [taskAssigneeId],
+        priority: taskPriority,
+        due_date: taskDueDate || null,
+        labels: ['Project Task'],
+        estimate_hours: 8,
+      }, authToken);
+      setProjectTasks((current) => [created, ...current]);
+      setTaskTitle('');
+      setTaskDescription('');
+      setTaskAssigneeId('');
+      setTaskPriority('medium');
+      setTaskDueDate('');
+      showFeedback('success', 'Project task created and synced to Task Tracker.');
+    } catch (error) {
+      showFeedback('error', error instanceof Error ? error.message : 'Task creation failed.');
+    }
+  };
 
   // RENDERING BY ROLE
   return (
@@ -295,20 +378,26 @@ export default function Projects() {
           </p>
         </div>
 
-        {/* Studio Head Action Tabs */}
-        {previewRole === 'studio_head' && (
+        {/* Project Workflow Tabs */}
+        {previewRole !== 'employee' && (
           <div className="flex bg-surface-alt border border-border p-1 rounded-xl text-xs font-semibold self-start">
             <button
-              onClick={() => setStudioTab('portfolio')}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${studioTab === 'portfolio' ? 'bg-purple-600 text-white shadow-xs' : 'text-ink-soft hover:text-ink'}`}
+              onClick={() => setProjectTab('portfolio')}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${projectTab === 'portfolio' ? 'bg-purple-600 text-white shadow-xs' : 'text-ink-soft hover:text-ink'}`}
             >
               Portfolio List
             </button>
             <button
-              onClick={() => setStudioTab('allocations')}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${studioTab === 'allocations' ? 'bg-purple-600 text-white shadow-xs' : 'text-ink-soft hover:text-ink'}`}
+              onClick={() => setProjectTab('allocations')}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${projectTab === 'allocations' ? 'bg-purple-600 text-white shadow-xs' : 'text-ink-soft hover:text-ink'}`}
             >
               Resource Allocation Tab
+            </button>
+            <button
+              onClick={() => setProjectTab('tasks')}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${projectTab === 'tasks' ? 'bg-purple-600 text-white shadow-xs' : 'text-ink-soft hover:text-ink'}`}
+            >
+              Project Tasks
             </button>
           </div>
         )}
@@ -325,7 +414,7 @@ export default function Projects() {
       {/* RENDER VIEW SCHEMES */}
 
       {/* SCHEME A: ALLOCATIONS MANAGEMENT (Studio Head Tab 2) */}
-      {previewRole === 'studio_head' && studioTab === 'allocations' ? (
+      {previewRole !== 'employee' && projectTab === 'allocations' ? (
         <div className="space-y-6 animate-[fadeIn_0.2s_ease]">
           {/* Allocation Actions Control */}
           <div className="flex flex-wrap gap-3 items-center justify-between bg-surface border border-border rounded-xl p-4 shadow-sm">
@@ -672,6 +761,128 @@ export default function Projects() {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : previewRole !== 'employee' && projectTab === 'tasks' ? (
+        <div className="space-y-6">
+          <div className="bg-surface border border-border rounded-xl p-4 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-bold text-ink flex items-center gap-2">
+                <ClipboardList size={16} className="text-purple-600" />
+                Project-Specific Task Allocation
+              </h3>
+              <p className="text-xs text-ink-soft mt-1">
+                Create tasks under a selected project. These are stored in the common backend task table and appear automatically in Task Tracker dashboard, table, kanban, reports, and review flow.
+              </p>
+            </div>
+            <select
+              value={taskProjectId}
+              onChange={(event) => {
+                setTaskProjectId(event.target.value);
+                setTaskAssigneeId('');
+              }}
+              className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-semibold text-ink outline-none focus:border-purple-600"
+            >
+              <option value="">Select governed project</option>
+              {activeFilteredProjects.map((project) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <form onSubmit={handleProjectTaskSubmit} className="rounded-xl border border-border bg-surface p-5 shadow-sm space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr_150px_150px] gap-3">
+              <input
+                value={taskTitle}
+                onChange={(event) => setTaskTitle(event.target.value)}
+                required
+                minLength={3}
+                placeholder="Task title for selected project"
+                className="rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-purple-600"
+              />
+              <select
+                value={taskAssigneeId}
+                onChange={(event) => setTaskAssigneeId(event.target.value)}
+                required
+                className="rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-purple-600"
+              >
+                <option value="">Assign allocated team member</option>
+                {taskProjectTeam.map((employee) => (
+                  <option key={employee.id} value={employee.id}>{employee.name} - {employee.title}</option>
+                ))}
+              </select>
+              <select
+                value={taskPriority}
+                onChange={(event) => setTaskPriority(event.target.value as TaskPriority)}
+                className="rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-purple-600"
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+              <input
+                type="date"
+                value={taskDueDate}
+                onChange={(event) => setTaskDueDate(event.target.value)}
+                className="rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-purple-600"
+              />
+            </div>
+            <textarea
+              value={taskDescription}
+              onChange={(event) => setTaskDescription(event.target.value)}
+              rows={3}
+              placeholder="Describe expected output, acceptance criteria, dependencies, and status reporting expectations."
+              className="w-full resize-none rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-purple-600"
+            />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <p className="text-xs text-ink-faint">
+                {canCreateProjectTasks
+                  ? `${taskProjectTeam.length} allocated team member${taskProjectTeam.length === 1 ? '' : 's'} available for task assignment.`
+                  : 'Task creation is restricted to project/program managers, studio head, or allocated technical architects.'}
+              </p>
+              <button
+                disabled={!canCreateProjectTasks || !taskProjectId}
+                className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                Create Project Task
+              </button>
+            </div>
+          </form>
+
+          <div className="rounded-xl border border-border bg-surface shadow-sm overflow-hidden">
+            <div className="border-b border-border px-5 py-4">
+              <h3 className="text-sm font-bold text-ink">Tasks For {selectedTaskProject?.name || 'Selected Project'}</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-surface-alt text-[10px] uppercase tracking-wider text-ink-faint">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Task</th>
+                    <th className="px-4 py-3 text-left">Assignee</th>
+                    <th className="px-4 py-3 text-left">Priority</th>
+                    <th className="px-4 py-3 text-left">Status</th>
+                    <th className="px-4 py-3 text-left">Due</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {projectTasks.filter((task) => !taskProjectId || task.project_id === taskProjectId).map((task) => (
+                    <tr key={task.id} className="hover:bg-purple-50/30">
+                      <td className="px-4 py-3 font-semibold text-ink">{task.title}</td>
+                      <td className="px-4 py-3 text-ink-soft">{task.assignee_name || 'Unassigned'}</td>
+                      <td className="px-4 py-3 text-ink-soft">{task.priority}</td>
+                      <td className="px-4 py-3 text-ink-soft">{task.status.replace('_', ' ')}</td>
+                      <td className="px-4 py-3 text-ink-soft">{task.due_date || '-'}</td>
+                    </tr>
+                  ))}
+                  {projectTasks.filter((task) => !taskProjectId || task.project_id === taskProjectId).length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-sm text-ink-soft">No tasks created for this project yet.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

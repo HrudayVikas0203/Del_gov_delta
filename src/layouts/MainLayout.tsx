@@ -4,6 +4,7 @@ import Sidebar from '../components/Sidebar';
 import Topbar from '../components/Topbar';
 import { useStore } from '../store/useStore';
 import { apiListEmployees, apiListAccounts, apiListProjects, apiListAllocations, apiListStatuses } from '../services/api';
+import type { RoleCategory } from '../types';
 
 export default function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -21,7 +22,7 @@ export default function MainLayout() {
           apiListStatuses(authToken)
         ]);
         setEmployees(emp.map(e => {
-          let rc = 'Developer';
+          let rc: RoleCategory = 'Developer';
           if (e.role === 'delivery_head') rc = 'Studio Head';
           else if (e.role === 'program_manager') rc = 'Program Manager';
           else if (e.role === 'project_manager') rc = 'Manager';
@@ -102,7 +103,7 @@ export default function MainLayout() {
           allocationDate: a.start_date,
           allocationPercent: a.allocation_percent,
           reportingManager: a.reporting_manager_id || '',
-          projectStatus: 'Active'
+          projectStatus: 'Active' as const
         }));
         setAllocations(mappedAllocations);
         

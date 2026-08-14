@@ -183,3 +183,89 @@ export async function apiDeleteAllocation(id: string, token: string) {
 export async function apiListAllocations(token: string) {
   return request<any[]>('/governance/allocations', { method: 'GET' }, token);
 }
+
+export async function apiListTasks(token: string, filters: { projectId?: string; assigneeId?: string } = {}) {
+  const params = new URLSearchParams();
+  if (filters.projectId) params.set('project_id', filters.projectId);
+  if (filters.assigneeId) params.set('assignee_id', filters.assigneeId);
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  return request<any[]>(`/tasks${suffix}`, { method: 'GET' }, token);
+}
+
+export async function apiCreateTask(payload: unknown, token: string) {
+  return request<any>('/tasks', { method: 'POST', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiUpdateTask(taskId: string, payload: unknown, token: string) {
+  return request<any>(`/tasks/${taskId}`, { method: 'PUT', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiUpdateTaskStatus(taskId: string, payload: unknown, token: string) {
+  return request<any>(`/tasks/${taskId}/status`, { method: 'PUT', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiSubmitTaskForReview(taskId: string, payload: unknown, token: string) {
+  return request<any>(`/tasks/${taskId}/submit-for-review`, { method: 'POST', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiTaskApproval(taskId: string, payload: unknown, token: string) {
+  return request<any>(`/tasks/${taskId}/approval`, { method: 'POST', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiDeleteTask(taskId: string, token: string) {
+  return request<void>(`/tasks/${taskId}`, { method: 'DELETE' }, token);
+}
+
+export async function apiListTaskComments(taskId: string, token: string) {
+  return request<any[]>(`/tasks/${taskId}/comments`, { method: 'GET' }, token);
+}
+
+export async function apiAddTaskComment(taskId: string, payload: unknown, token: string) {
+  return request<any>(`/tasks/${taskId}/comments`, { method: 'POST', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiListBRDDocuments(token: string, projectId?: string) {
+  const suffix = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+  return request<any[]>(`/brd/documents${suffix}`, { method: 'GET' }, token);
+}
+
+export async function apiUploadBRDDocument(formData: FormData, token: string) {
+  return request<any>('/brd/documents/upload', { method: 'POST', body: formData }, token);
+}
+
+export async function apiListProjectRequirements(projectId: string, token: string) {
+  return request<any[]>(`/brd/projects/${projectId}/requirements`, { method: 'GET' }, token);
+}
+
+export async function apiSaveRequirements(payload: unknown, token: string) {
+  return request<any>('/brd/requirements', { method: 'POST', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiListBRDArtifacts(projectId: string, token: string, artifactType?: string) {
+  const suffix = artifactType ? `?artifact_type=${encodeURIComponent(artifactType)}` : '';
+  return request<any[]>(`/brd/projects/${projectId}/artifacts${suffix}`, { method: 'GET' }, token);
+}
+
+export async function apiCreateBRDArtifact(payload: unknown, token: string) {
+  return request<any>('/brd/artifacts', { method: 'POST', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiGenerateBRDAsset(payload: unknown, token: string) {
+  return request<any>('/brd/generate', { method: 'POST', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiBRDCopilotChat(payload: unknown, token: string) {
+  return request<any>('/brd/copilot/chat', { method: 'POST', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiListScheduledEmails(token: string) {
+  return request<any[]>('/emails', { method: 'GET' }, token);
+}
+
+export async function apiScheduleEmail(payload: unknown, token: string) {
+  return request<any>('/emails', { method: 'POST', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiEmailConfig(token: string) {
+  return request<{ smtp_configured: boolean }>('/emails/config', { method: 'GET' }, token);
+}

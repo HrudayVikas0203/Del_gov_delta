@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import FastAPI
 from flask import Flask, jsonify
 from starlette.middleware.cors import CORSMiddleware
@@ -6,8 +8,10 @@ from app.api.v1.router import api_router
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
+from app.db.schema import ensure_schema_upgrades
 from app.db.seed import seed
 from app.db.session import Base, engine
+from app.services.email import dispatch_due_scheduled_emails
 
 
 def create_flask_ops_app() -> Flask:
@@ -34,7 +38,26 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     def ensure_schema() -> None:
         Base.metadata.create_all(bind=engine)
+        ensure_schema_upgrades()
         seed()
+
+    @app.on_event("startup")
+    async def start_email_dispatcher() -> None:
+        async def dispatch_loop() -> None:
+            while True:
+                try:
+                    dispatch_due_scheduled_emails()
+                except Exception:
+                    pass
+                await asyncio.sleep(30)
+
+        app.state.email_dispatch_task = asyncio.create_task(dispatch_loop())
+
+    @app.on_event("shutdown")
+    async def stop_email_dispatcher() -> None:
+        task = getattr(app.state, "email_dispatch_task", None)
+        if task:
+            task.cancel()
 
     @app.get("/health", tags=["ops"])
     def health() -> dict:

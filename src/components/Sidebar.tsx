@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Activity, Grid, Building, Calendar, CheckCircle, Bell, User, Settings, HelpCircle, Users, Cpu, FileText, Shield, FolderKanban } from 'lucide-react';
+import { Activity, Grid, Building, Calendar, CheckCircle, Bell, User, Settings, HelpCircle, Users, Cpu, FileText, Shield, FolderKanban, ClipboardList } from 'lucide-react';
 import { useStore } from '../store/useStore';
 
 export default function Sidebar({ collapsed }: { collapsed: boolean }) {
@@ -15,6 +15,7 @@ export default function Sidebar({ collapsed }: { collapsed: boolean }) {
     { path: '/projects', label: 'Projects', icon: FolderKanban, show: true },
     { path: '/employees', label: 'People', icon: Users, show: isManager },
     { path: '/weekly-status', label: 'Weekly Status', icon: Calendar, show: true },
+    { path: '/tasks', label: 'Task Tracker', icon: ClipboardList, show: true },
     {
       path: '/approvals',
       label: isManager ? 'Approval Queue' : 'My Approvals',
@@ -23,6 +24,7 @@ export default function Sidebar({ collapsed }: { collapsed: boolean }) {
       show: true
     },
     { path: '/ai-insights', label: 'AI Insights', icon: Cpu, show: isManager },
+    { path: '/brd-studio', label: 'BRD Studio', icon: FileText, show: true },
     { path: '/reports', label: 'Reports', icon: FileText, show: isManager },
     { path: '/notifications', label: 'Notifications', icon: Bell, show: true },
   ];

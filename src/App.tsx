@@ -12,6 +12,8 @@ const EmployeeDirectory = lazy(() => import('./pages/EmployeeDirectory'));
 const WeeklyStatus = lazy(() => import('./pages/WeeklyStatus'));
 const Approvals = lazy(() => import('./pages/Approvals'));
 const AIInsights = lazy(() => import('./pages/AIInsights'));
+const TaskTracker = lazy(() => import('./pages/TaskTracker'));
+const BRDStudio = lazy(() => import('./pages/BRDStudio'));
 const Reports = lazy(() => import('./pages/Reports'));
 const Notifications = lazy(() => import('./pages/Notifications'));
 const AuditLogs = lazy(() => import('./pages/AuditLogs'));
@@ -56,6 +58,8 @@ function App() {
           <Route path="/weekly-status" element={<Suspense fallback={<PageLoader />}><WeeklyStatus /></Suspense>} />
           <Route path="/approvals" element={<Suspense fallback={<PageLoader />}><Approvals /></Suspense>} />
           <Route path="/ai-insights" element={<Suspense fallback={<PageLoader />}><AIInsights /></Suspense>} />
+          <Route path="/tasks" element={<Suspense fallback={<PageLoader />}><TaskTracker /></Suspense>} />
+          <Route path="/brd-studio" element={<Suspense fallback={<PageLoader />}><BRDStudio /></Suspense>} />
           <Route path="/reports" element={<Suspense fallback={<PageLoader />}><Reports /></Suspense>} />
           <Route path="/notifications" element={<Suspense fallback={<PageLoader />}><Notifications /></Suspense>} />
           <Route path="/audit-logs" element={<Suspense fallback={<PageLoader />}><AuditLogs /></Suspense>} />

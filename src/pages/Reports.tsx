@@ -102,6 +102,7 @@ export default function Reports() {
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
   const [selectedReportRole, setSelectedReportRole] = useState<ReportRoleKey>('developer');
+  const [statusFrequency, setStatusFrequency] = useState<'all' | 'daily' | 'weekly' | 'monthly'>('weekly');
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [uploadName, setUploadName] = useState('');
@@ -254,6 +255,7 @@ export default function Reports() {
       account_id: reportScopeMode === 'portfolio' ? account?.id : undefined,
       project_id: (reportScopeMode === 'project' || reportScopeMode === 'individual') ? selectedProjectId : undefined,
       employee_id: reportScopeMode === 'individual' ? selectedEmployeeId : undefined,
+      status_frequency: statusFrequency === 'all' ? undefined : statusFrequency,
       template_id: matchingTemplateId,
       llm: currentProvider?.configured ? { provider: selectedProviderName, model: selectedProviderModel } : undefined,
       use_celery: false,
@@ -349,6 +351,19 @@ export default function Reports() {
           <div>
             <h3 className="text-sm font-bold text-ink">Report Coverage</h3>
             <p className="text-xs text-ink-soft">Generate individual developer reports or full project rollups from all submitted statuses.</p>
+          </div>
+          <div className="grid gap-2 max-w-sm">
+            <label className="text-xs font-semibold text-ink-soft">Status period included in PPT/PDF</label>
+            <select
+              value={statusFrequency}
+              onChange={(e) => setStatusFrequency(e.target.value as typeof statusFrequency)}
+              className="text-xs px-3 py-2 rounded-lg border border-border bg-surface text-ink font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+            >
+              <option value="all">All submitted status cycles</option>
+              <option value="daily">Daily statuses only</option>
+              <option value="weekly">Weekly statuses only</option>
+              <option value="monthly">Monthly statuses only</option>
+            </select>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
             {[
@@ -473,9 +488,16 @@ export default function Reports() {
                 className="w-full text-xs px-3 py-2 rounded-lg border border-border bg-surface text-ink font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30"
               >
                 <option value="">Default generated layout</option>
-                {templates.map((template) => (
+                {templates
+                  .filter((template) => {
+                    if (selectedProjectId && template.project_id && template.project_id !== selectedProjectId) return false;
+                    const account = accounts.find((acc) => acc.name === selectedScopeAccount);
+                    if (account?.id && template.account_id && template.account_id !== account.id) return false;
+                    return true;
+                  })
+                  .map((template) => (
                   <option key={template.id} value={template.id}>
-                    {template.name} ({template.file_type.toUpperCase()})
+                    {template.name} ({template.file_type.toUpperCase()}{template.project_id ? ' / project' : template.account_id ? ' / account' : ' / global'})
                   </option>
                 ))}
               </select>
@@ -560,6 +582,9 @@ export default function Reports() {
                 }
                 const formData = new FormData();
                 formData.append('name', uploadName.trim());
+                const selectedAccount = accounts.find((acc) => acc.name === selectedScopeAccount);
+                if (selectedAccount?.id) formData.append('account_id', selectedAccount.id);
+                if (selectedProjectId) formData.append('project_id', selectedProjectId);
                 formData.append('file', uploadFile);
                 setUploadStatus('Uploading template...');
                 try {

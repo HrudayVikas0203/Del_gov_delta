@@ -4,8 +4,11 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.delivery import AccountStatus, AllocationRole, Health, ProjectPhase, RiskLevel
+from app.models.brd import BRDDocumentStatus
+from app.models.email import EmailStatus
 from app.models.people import Availability, Role
 from app.models.status import ReportFormat, ReportType, SubmissionStatus
+from app.models.tasks import TaskPriority, TaskStatus
 
 
 class ORMModel(BaseModel):
@@ -170,6 +173,197 @@ class AllocationOut(ORMModel):
     department: str | None = None
 
 
+class TaskCreate(BaseModel):
+    project_id: str
+    title: str = Field(min_length=3, max_length=220)
+    description: str | None = None
+    assignee_id: str | None = None
+    assignee_ids: list[str] = []
+    due_date: date | None = None
+    priority: TaskPriority = TaskPriority.MEDIUM
+    status: TaskStatus = TaskStatus.TODO
+    estimate_hours: int = Field(default=0, ge=0)
+    labels: list[str] = []
+    tags: list[str] = []
+    checklist: list[dict | str] = []
+    blocker_reason: str | None = None
+
+
+class TaskUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=3, max_length=220)
+    description: str | None = None
+    assignee_id: str | None = None
+    assignee_ids: list[str] | None = None
+    due_date: date | None = None
+    priority: TaskPriority | None = None
+    status: TaskStatus | None = None
+    estimate_hours: int | None = Field(default=None, ge=0)
+    actual_hours: int | None = Field(default=None, ge=0)
+    labels: list[str] | None = None
+    tags: list[str] | None = None
+    checklist: list[dict | str] | None = None
+    blocker_reason: str | None = None
+    rejection_reason: str | None = None
+
+
+class TaskOut(ORMModel):
+    id: str
+    project_id: str
+    title: str
+    description: str | None
+    status: TaskStatus
+    priority: TaskPriority
+    assignee_id: str | None
+    reporter_id: str | None
+    due_date: date | None
+    estimate_hours: int
+    actual_hours: int
+    labels: list[str] = []
+    tags: list[str] = []
+    checklist: list[dict | str] = []
+    assignee_ids: list[str] = []
+    blocker_reason: str | None
+    rejection_reason: str | None = None
+    submitted_for_review_at: datetime | None = None
+    approved_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    project_name: str | None = None
+    assignee_name: str | None = None
+
+
+class TaskCommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class TaskCommentOut(ORMModel):
+    id: str
+    task_id: str
+    author_id: str | None
+    body: str
+    created_at: datetime
+    author_name: str | None = None
+
+
+class TaskReviewSubmit(BaseModel):
+    note: str | None = None
+
+
+class TaskApprovalAction(BaseModel):
+    action: str = Field(pattern="^(approve|reject|changes_requested|block|unblock)$")
+    comment: str | None = None
+
+
+class ScheduledEmailCreate(BaseModel):
+    recipients: list[EmailStr]
+    subject: str = Field(min_length=3, max_length=255)
+    body: str = Field(min_length=1)
+    email_type: str = "project_update"
+    delivery: str = Field(default="schedule", pattern="^(send_now|schedule)$")
+    task_id: str | None = None
+    project_id: str | None = None
+    scheduled_at: datetime | None = None
+
+
+class ScheduledEmailOut(ORMModel):
+    id: str
+    sender_id: str | None
+    recipients: list[EmailStr]
+    subject: str
+    body: str
+    email_type: str
+    task_id: str | None
+    project_id: str | None
+    scheduled_at: datetime | None
+    status: EmailStatus
+    error_message: str | None
+    created_at: datetime
+    sent_at: datetime | None
+
+
+class BRDDocumentOut(ORMModel):
+    id: str
+    project_id: str
+    filename: str
+    document_type: str
+    storage_path: str | None
+    content_type: str | None
+    size_bytes: int
+    status: BRDDocumentStatus
+    uploaded_by_id: str | None
+    uploaded_at: datetime
+    project_name: str | None = None
+
+
+class RequirementSave(BaseModel):
+    document_id: str
+    project_id: str
+    overview: str | None = None
+    functional: list[dict | str] = []
+    non_functional: list[dict | str] = []
+    assumptions: list[dict | str] = []
+    created_by: str = "AI Engine"
+
+
+class RequirementOut(ORMModel):
+    id: str
+    document_id: str
+    project_id: str
+    version: int
+    overview: str | None
+    functional: list[dict | str] = []
+    non_functional: list[dict | str] = []
+    assumptions: list[dict | str] = []
+    created_by: str
+    created_at: datetime
+
+
+class BRDArtifactCreate(BaseModel):
+    project_id: str
+    document_id: str | None = None
+    artifact_type: str = Field(pattern="^(business_flow|architecture|database_design)$")
+    title: str = Field(min_length=3, max_length=180)
+    payload: dict
+    ai_provider: str | None = None
+    model_used: str | None = None
+
+
+class BRDGenerateRequest(BaseModel):
+    project_id: str
+    document_id: str | None = None
+    artifact_type: str = Field(pattern="^(requirements|business_flow|architecture|database_design|executive_report)$")
+    prompt: str | None = None
+    provider: str = "groq"
+    model: str | None = None
+
+
+class BRDChatRequest(BaseModel):
+    project_id: str
+    question: str
+    session_id: str = "default"
+    provider: str = "groq"
+    model: str | None = None
+
+
+class BRDChatOut(BaseModel):
+    answer: str
+    sources: list[dict] = []
+
+
+class BRDArtifactOut(ORMModel):
+    id: str
+    project_id: str
+    document_id: str | None
+    artifact_type: str
+    version: int
+    title: str
+    payload: dict
+    ai_provider: str | None
+    model_used: str | None
+    created_by_id: str | None
+    created_at: datetime
+
+
 class WeeklyStatusCreate(BaseModel):
     employee_id: str
     project_id: str | None = None
@@ -219,6 +413,7 @@ class ReportCreate(BaseModel):
     account_id: str | None = None
     project_id: str | None = None
     employee_id: str | None = None
+    status_frequency: str | None = Field(default=None, pattern="^(daily|weekly|monthly)$")
     use_celery: bool = True
 
 
@@ -227,6 +422,8 @@ class ReportTemplateOut(ORMModel):
     name: str
     file_path: str
     file_type: str
+    account_id: str | None = None
+    project_id: str | None = None
     uploaded_by_id: str | None
     uploaded_at: datetime
 

@@ -1,11 +1,12 @@
 import { useState } from 'react';
+import type { FormEvent } from 'react';
 import { Building, Search, Globe, Shield, Coins, AlertCircle, Sparkles, Plus, X } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { Account } from '../types';
 import { apiCreateAccount } from '../services/api';
 
 export default function Accounts() {
-  const { accounts, projects, setAccounts, authToken, employees } = useStore();
+  const { accounts, projects, setAccounts, authToken } = useStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedHealth, setSelectedHealth] = useState<string>('all');
   const [selectedIndustry, setSelectedIndustry] = useState<string>('all');
@@ -49,7 +50,7 @@ export default function Accounts() {
     );
   };
 
-  const handleCreateAccount = async (e: React.FormEvent) => {
+  const handleCreateAccount = async (e: FormEvent) => {
     e.preventDefault();
     if (!authToken) return;
     try {
@@ -68,7 +69,9 @@ export default function Accounts() {
         businessUnit: created.business_unit,
         contractValue: `$${(created.contract_value / 1000000).toFixed(1)}M`, // rough formatting
         status: created.status,
-        health: created.health
+        health: created.health,
+        studioId: '',
+        deliveryManagerId: created.delivery_head_id || '',
       }]);
       setIsAddingAccount(false);
       setNewAccountData({ name: '', industry: 'Financial Services', country: 'United States', businessUnit: 'Banking', contractValue: '0' });
