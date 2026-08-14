@@ -88,6 +88,10 @@ def delete_account(account_id: str, db: Session = Depends(get_db), actor: Employ
 @router.post("/projects", response_model=ProjectOut, status_code=201)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db), actor: Employee = Depends(require_min_role(Role.PROJECT_MANAGER))) -> Project:
     data = payload.model_dump(exclude={"tech_stack"})
+    if actor.role == Role.PROJECT_MANAGER and not data.get("project_manager_id"):
+        data["project_manager_id"] = actor.id
+    if actor.role == Role.PROGRAM_MANAGER and not data.get("program_manager_id"):
+        data["program_manager_id"] = actor.id
     data["tech_stack"] = ",".join(payload.tech_stack)
     project = Project(**data)
     db.add(project)

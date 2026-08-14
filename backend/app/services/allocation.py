@@ -14,9 +14,13 @@ MANUAL_ALLOCATION_ROLES = {Role.PROJECT_MANAGER, Role.PROGRAM_MANAGER, Role.DELI
 def ensure_allocation_authority(actor: Employee, project: Project) -> None:
     if actor.role not in MANUAL_ALLOCATION_ROLES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only PM, program manager, or delivery head can allocate resources")
-    if actor.role == Role.PROJECT_MANAGER and project.project_manager_id != actor.id:
+    if actor.role == Role.PROJECT_MANAGER:
+        if project.project_manager_id in {None, actor.id}:
+            return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Project managers can allocate only within their own projects")
-    if actor.role == Role.PROGRAM_MANAGER and project.program_manager_id != actor.id:
+    if actor.role == Role.PROGRAM_MANAGER:
+        if project.program_manager_id in {None, actor.id}:
+            return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Program managers can allocate only within their programs")
 
 

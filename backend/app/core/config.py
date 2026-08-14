@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     secret_key: str = Field(default="change-this-in-production")
     access_token_expire_minutes: int = 480
 
-    database_backend: str = "mysql"
+    database_backend: str = "sqlite"
     sqlite_database: str = "backend/storage/delivery_governance.db"
     mysql_host: str = "127.0.0.1"
     mysql_port: int = 3306
