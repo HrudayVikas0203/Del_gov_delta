@@ -20,6 +20,36 @@ from app.workers.tasks import generate_report_task
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
+def _match_report_template(db: Session, payload: ReportCreate) -> ReportTemplate | None:
+    requested_type = payload.report_format.value
+    project_id = payload.project_id or None
+    account_id = payload.account_id or None
+
+    if project_id:
+        project_template = db.scalar(
+            select(ReportTemplate)
+            .where(ReportTemplate.project_id == project_id, ReportTemplate.file_type == requested_type)
+            .order_by(ReportTemplate.uploaded_at.desc())
+        )
+        if project_template:
+            return project_template
+
+    if account_id:
+        account_template = db.scalar(
+            select(ReportTemplate)
+            .where(ReportTemplate.account_id == account_id, ReportTemplate.file_type == requested_type)
+            .order_by(ReportTemplate.uploaded_at.desc())
+        )
+        if account_template:
+            return account_template
+
+    return db.scalar(
+        select(ReportTemplate)
+        .where(ReportTemplate.project_id.is_(None), ReportTemplate.account_id.is_(None), ReportTemplate.file_type == requested_type)
+        .order_by(ReportTemplate.uploaded_at.desc())
+    )
+
+
 @router.post("", response_model=ReportOut, status_code=201)
 def create_report(payload: ReportCreate, db: Session = Depends(get_db), actor: Employee = Depends(require_min_role(Role.PROJECT_MANAGER))) -> GeneratedReport:
     scope_parts = [payload.scope]
@@ -50,6 +80,8 @@ def create_report(payload: ReportCreate, db: Session = Depends(get_db), actor: E
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected template belongs to a different project")
         if payload.account_id and template.account_id and template.account_id != payload.account_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected template belongs to a different account")
+    else:
+        template = _match_report_template(db, payload)
 
     report = GeneratedReport(
         title=payload.title,

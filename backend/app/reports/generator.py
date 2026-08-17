@@ -246,7 +246,8 @@ def generate_report_file(db: Session, report_id: str, llm: LLMSelection | None =
 
 
 def _generate_ppt(path: Path, report: GeneratedReport, projects: list[Project], statuses: list[WeeklyStatus], db: Session, llm: LLMSelection | None = None) -> None:
-    prs = Presentation(report.template.file_path) if getattr(report, "template", None) and report.template and report.template.file_type == "pptx" else Presentation()
+    base_template = report.template.file_path if getattr(report, "template", None) and report.template and report.template.file_type == "pptx" else None
+    prs = Presentation(base_template) if base_template and Path(base_template).exists() else Presentation()
 
     if len(prs.slides) == 0:
         title = prs.slides.add_slide(prs.slide_layouts[0])

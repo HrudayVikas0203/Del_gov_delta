@@ -5,6 +5,7 @@ from pathlib import Path
 os.environ.setdefault("DATABASE_BACKEND", "sqlite")
 
 from fastapi.testclient import TestClient
+from pptx import Presentation
 
 from app.core.config import get_settings
 from app.db.seed import seed
@@ -134,6 +135,107 @@ def test_account_project_allocation_status_and_ppt_flow() -> None:
     file_path = Path(report["file_path"])
     assert file_path.exists(), file_path
     assert file_path.suffix == ".pptx"
+
+
+def test_account_template_is_auto_selected_for_project_reports() -> None:
+    get_settings.cache_clear()
+    Base.metadata.create_all(bind=engine)
+    seed()
+
+    client = TestClient(app)
+    login_resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "gowtham.rallabandi@delta.com", "password": "Demo@123"},
+    )
+    assert login_resp.status_code == 200, login_resp.text
+    token = login_resp.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    account_name = f"Northwind Capital {uuid.uuid4().hex[:8]}"
+    account_resp = client.post(
+        "/api/v1/governance/accounts",
+        json={
+            "name": account_name,
+            "industry": "Finance",
+            "country": "USA",
+            "business_unit": "Private Banking",
+            "contract_value": 1500000,
+            "start_date": "2026-08-01",
+            "end_date": "2027-08-01",
+        },
+        headers=headers,
+    )
+    assert account_resp.status_code == 201, account_resp.text
+    account_id = account_resp.json()["id"]
+
+    project_name = f"Treasury Analytics {uuid.uuid4().hex[:8]}"
+    project_resp = client.post(
+        "/api/v1/governance/projects",
+        json={
+            "account_id": account_id,
+            "name": project_name,
+            "phase": "development",
+            "client": account_name,
+            "budget_used": 0,
+            "budget_total": 1200000,
+            "tech_stack": ["React", "FastAPI", "Postgres"],
+            "sprint_number": 3,
+            "description": "Modern treasury analytics and risk dashboard.",
+            "start_date": "2026-08-05",
+            "completion_percent": 55,
+        },
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    template_path = Path("/tmp") / f"{uuid.uuid4().hex}.pptx"
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[0])
+    slide.shapes.title.text = "REPORT TITLE"
+    body = slide.shapes.add_textbox(1.5, 2.0, 8, 2.2)
+    body.text_frame.text = "EXECUTIVE SUMMARY"
+    prs.save(template_path)
+
+    with template_path.open("rb") as file_handle:
+        template_resp = client.post(
+            "/api/v1/reports/templates",
+            data={"name": "Account Template", "account_id": account_id},
+            files={"file": (template_path.name, file_handle, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+            headers=headers,
+        )
+    assert template_resp.status_code == 201, template_resp.text
+    template_id = template_resp.json()["id"]
+
+    report_resp = client.post(
+        "/api/v1/reports",
+        json={
+            "title": f"{project_name} Weekly Status",
+            "report_type": "project_report",
+            "report_format": "pptx",
+            "scope": f"project:{project_id}",
+            "account_id": account_id,
+            "project_id": project_id,
+            "status_frequency": "weekly",
+            "use_celery": False,
+            "llm": None,
+        },
+        headers=headers,
+    )
+    assert report_resp.status_code == 201, report_resp.text
+    report = report_resp.json()
+    assert report["template_id"] == template_id, report
+    assert report["file_path"], report
+    assert Path(report["file_path"]).exists(), report["file_path"]
+
+    generated = Presentation(report["file_path"])
+    assert len(generated.slides) >= 1
+    text_chunks = []
+    for slide in generated.slides:
+        for shape in slide.shapes:
+            if hasattr(shape, "text") and shape.text:
+                text_chunks.append(shape.text)
+    assert any(project_name in chunk for chunk in text_chunks)
 
 
 def test_trimble_finance_ai_assistant_seed_data_exists() -> None:
