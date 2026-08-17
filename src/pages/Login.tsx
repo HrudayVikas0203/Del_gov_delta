@@ -15,6 +15,11 @@ const DEMO_ACCOUNTS = [
   { label: 'Architect (Suresh)',            email: 'suresh.babu@delta.com',        color: 'bg-teal-100 text-teal-700 border-teal-200 hover:bg-teal-50 hover:border-teal-300' },
   { label: 'Developer (Sneha)',            email: 'sneha.patil@delta.com',        color: 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-300' },
   { label: 'QA (Karthik)',                  email: 'karthik.venkat@delta.com',     color: 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-50 hover:border-amber-300' },
+  { label: 'Trimble PM (Maria)',            email: 'maria.chen@trimble.com',       color: 'bg-cyan-100 text-cyan-700 border-cyan-200 hover:bg-cyan-50 hover:border-cyan-300' },
+  { label: 'Trimble Architect (David)',    email: 'david.miles@trimble.com',      color: 'bg-violet-100 text-violet-700 border-violet-200 hover:bg-violet-50 hover:border-violet-300' },
+  { label: 'Trimble Frontend (Nina)',      email: 'nina.patel@trimble.com',       color: 'bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-300' },
+  { label: 'Trimble Backend (Omar)',       email: 'omar.hassan@trimble.com',      color: 'bg-yellow-100 text-yellow-700 border-yellow-200 hover:bg-yellow-50 hover:border-yellow-300' },
+  { label: 'Trimble QA (Aisha)',           email: 'aisha.khan@trimble.com',       color: 'bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-50 hover:border-orange-300' },
 ] as const;
 
 const VALID_EMAILS = new Set<string>(DEMO_ACCOUNTS.map(a => a.email));
@@ -33,8 +38,9 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    if (!email.endsWith('@delta.com')) {
-      setError('Enter a valid @delta.com email address.');
+    const isSupportedDemoDomain = email.toLowerCase().endsWith('@delta.com') || email.toLowerCase().endsWith('@trimble.com');
+    if (!isSupportedDemoDomain) {
+      setError('Enter a valid @delta.com or @trimble.com email address.');
       return;
     }
 
