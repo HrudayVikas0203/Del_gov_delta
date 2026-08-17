@@ -7,8 +7,11 @@ os.environ.setdefault("DATABASE_BACKEND", "sqlite")
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
-from app.db.session import Base, engine
 from app.db.seed import seed
+from app.db.session import Base, SessionLocal, engine
+from app.models.delivery import Account, Project
+from app.models.status import WeeklyStatus, ReportTemplate
+from app.models.tasks import Task
 from app.main import app
 
 
@@ -131,3 +134,27 @@ def test_account_project_allocation_status_and_ppt_flow() -> None:
     file_path = Path(report["file_path"])
     assert file_path.exists(), file_path
     assert file_path.suffix == ".pptx"
+
+
+def test_trimble_finance_ai_assistant_seed_data_exists() -> None:
+    get_settings.cache_clear()
+    Base.metadata.create_all(bind=engine)
+    seed()
+
+    with SessionLocal() as db:
+        account = db.query(Account).filter(Account.name == "Trimble").one_or_none()
+        assert account is not None, "Trimble account was not seeded"
+
+        project = db.query(Project).filter(Project.name == "Trimble Finance AI Assistant").one_or_none()
+        assert project is not None, "Trimble Finance AI Assistant project was not seeded"
+        assert project.account_id == account.id
+
+        tasks = db.query(Task).filter(Task.project_id == project.id).all()
+        assert len(tasks) >= 4, "Expected multiple tasks for the Trimble project"
+
+        weekly_statuses = db.query(WeeklyStatus).filter(WeeklyStatus.project_id == project.id).all()
+        assert len(weekly_statuses) >= 4, "Expected weekly status updates for the Trimble project"
+
+        template = db.query(ReportTemplate).filter(ReportTemplate.project_id == project.id).one_or_none()
+        assert template is not None, "Expected a report template for the Trimble project"
+        assert Path(template.file_path).exists(), template.file_path
