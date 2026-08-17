@@ -168,8 +168,16 @@ export async function apiCreateAccount(payload: unknown, token: string) {
   return request<any>('/governance/accounts', { method: 'POST', body: JSON.stringify(payload) }, token);
 }
 
+export async function apiUpdateAccount(accountId: string, payload: unknown, token: string) {
+  return request<any>(`/governance/accounts/${accountId}`, { method: 'PUT', body: JSON.stringify(payload) }, token);
+}
+
 export async function apiCreateProject(payload: unknown, token: string) {
   return request<any>('/governance/projects', { method: 'POST', body: JSON.stringify(payload) }, token);
+}
+
+export async function apiUpdateProject(projectId: string, payload: unknown, token: string) {
+  return request<any>(`/governance/projects/${projectId}`, { method: 'PUT', body: JSON.stringify(payload) }, token);
 }
 
 export async function apiCreateAllocation(payload: unknown, token: string) {

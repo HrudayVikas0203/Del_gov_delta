@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Building, Search, Globe, Shield, Coins, AlertCircle, Sparkles, Plus, X } from 'lucide-react';
+import { Building, Search, Globe, Shield, Coins, AlertCircle, Sparkles, Plus, X, Pencil } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { Account } from '../types';
-import { apiCreateAccount } from '../services/api';
+import { apiCreateAccount, apiListReportTemplates, apiUpdateAccount, apiUploadReportTemplate } from '../services/api';
 
 export default function Accounts() {
   const { accounts, projects, setAccounts, authToken } = useStore();
@@ -11,6 +11,11 @@ export default function Accounts() {
   const [selectedHealth, setSelectedHealth] = useState<string>('all');
   const [selectedIndustry, setSelectedIndustry] = useState<string>('all');
   const [isAddingAccount, setIsAddingAccount] = useState(false);
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [accountTemplateFile, setAccountTemplateFile] = useState<File | null>(null);
+  const [accountTemplateName, setAccountTemplateName] = useState('');
+  const [accountTemplateStatus, setAccountTemplateStatus] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [newAccountData, setNewAccountData] = useState({
     name: '',
     industry: 'Financial Services',
@@ -18,6 +23,12 @@ export default function Accounts() {
     businessUnit: 'Banking',
     contractValue: '0'
   });
+
+  useEffect(() => {
+    if (!authToken) return;
+    apiListReportTemplates(authToken)
+      .catch(() => undefined);
+  }, [authToken]);
 
   // Compute aggregated stats
   const totalAccounts = accounts.length;
@@ -50,35 +61,105 @@ export default function Accounts() {
     );
   };
 
+  const resetAccountForm = () => {
+    setNewAccountData({
+      name: '',
+      industry: 'Financial Services',
+      country: 'United States',
+      businessUnit: 'Banking',
+      contractValue: '0'
+    });
+    setAccountTemplateFile(null);
+    setAccountTemplateName('');
+    setAccountTemplateStatus(null);
+    setEditingAccountId(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleCreateAccount = async (e: FormEvent) => {
     e.preventDefault();
     if (!authToken) return;
+
+    if (!newAccountData.name.trim()) {
+      setAccountTemplateStatus('Account name is required.');
+      return;
+    }
+
     try {
-      const created = await apiCreateAccount({
-        name: newAccountData.name,
+      const payload = {
+        name: newAccountData.name.trim(),
         industry: newAccountData.industry,
         country: newAccountData.country,
         business_unit: newAccountData.businessUnit,
-        contract_value: parseFloat(newAccountData.contractValue)
-      }, authToken);
-      setAccounts([...accounts, {
-        id: created.id,
-        name: created.name,
-        industry: created.industry,
-        country: created.country,
-        businessUnit: created.business_unit,
-        contractValue: `$${(created.contract_value / 1000000).toFixed(1)}M`, // rough formatting
-        status: created.status,
-        health: created.health,
-        studioId: '',
-        deliveryManagerId: created.delivery_head_id || '',
-      }]);
+        contract_value: Number(newAccountData.contractValue) || 0,
+      };
+
+      const saved = editingAccountId
+        ? await apiUpdateAccount(editingAccountId, payload, authToken)
+        : await apiCreateAccount(payload, authToken);
+
+      const nextAccounts = editingAccountId
+        ? accounts.map((account) => account.id === saved.id ? {
+            ...account,
+            name: saved.name,
+            industry: saved.industry,
+            country: saved.country,
+            businessUnit: saved.business_unit,
+            contractValue: `$${(Number(saved.contract_value || 0) / 1000000).toFixed(1)}M`,
+            status: saved.status,
+            health: saved.health,
+            deliveryManagerId: saved.delivery_head_id || account.deliveryManagerId,
+          } : account)
+        : [
+            ...accounts,
+            {
+              id: saved.id,
+              name: saved.name,
+              industry: saved.industry,
+              country: saved.country,
+              businessUnit: saved.business_unit,
+              contractValue: `$${(Number(saved.contract_value || 0) / 1000000).toFixed(1)}M`,
+              status: saved.status,
+              health: saved.health,
+              studioId: '',
+              deliveryManagerId: saved.delivery_head_id || '',
+            }
+          ];
+      setAccounts(nextAccounts);
+
+      if (accountTemplateFile) {
+        const formData = new FormData();
+        formData.append('name', accountTemplateName || accountTemplateFile.name.replace(/\.[^/.]+$/, ''));
+        formData.append('account_id', saved.id);
+        formData.append('file', accountTemplateFile);
+        await apiUploadReportTemplate(formData, authToken);
+      }
+
       setIsAddingAccount(false);
-      setNewAccountData({ name: '', industry: 'Financial Services', country: 'United States', businessUnit: 'Banking', contractValue: '0' });
+      resetAccountForm();
     } catch (err) {
       console.error(err);
-      alert('Failed to create account');
+      setAccountTemplateStatus(err instanceof Error ? err.message : 'Failed to save account');
     }
+  };
+
+  const openAccountEditor = (account?: Account) => {
+    if (account) {
+      setEditingAccountId(account.id);
+      setNewAccountData({
+        name: account.name,
+        industry: account.industry,
+        country: account.country,
+        businessUnit: account.businessUnit,
+        contractValue: String(Number(account.contractValue.replace(/[^0-9.]/g, '')) || 0),
+      });
+    } else {
+      resetAccountForm();
+    }
+    setAccountTemplateStatus(null);
+    setIsAddingAccount(true);
   };
 
   return (
@@ -89,7 +170,10 @@ export default function Accounts() {
           <p className="text-ink-soft text-sm mt-1">Manage delivery health, financials, and project allocations across corporate client accounts.</p>
         </div>
         <button 
-          onClick={() => setIsAddingAccount(true)}
+          onClick={() => {
+            resetAccountForm();
+            setIsAddingAccount(true);
+          }}
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors shadow-sm"
         >
           <Plus size={16} /> Add Account
@@ -189,19 +273,29 @@ export default function Accounts() {
                 }`}></div>
                 
                 {/* Account Header */}
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-semibold text-base text-ink group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
-                      {acc.name}
-                      {acc.status === 'Proposal' && (
-                        <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5 border border-slate-200">
-                          <Sparkles size={8} /> Proposal
-                        </span>
-                      )}
-                    </h3>
-                    <p className="text-xs text-ink-faint mt-0.5">{acc.businessUnit} • {acc.industry}</p>
-                  </div>
-                  <HealthBadge health={acc.health} />
+<div className="flex justify-between items-start gap-3">
+                    <div>
+                      <h3 className="font-semibold text-base text-ink group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
+                        {acc.name}
+                        {acc.status === 'Proposal' && (
+                          <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5 border border-slate-200">
+                            <Sparkles size={8} /> Proposal
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-xs text-ink-faint mt-0.5">{acc.businessUnit} • {acc.industry}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openAccountEditor(acc)}
+                        className="p-1.5 rounded-lg border border-border bg-surface text-ink-soft hover:text-ink hover:bg-surface-alt transition-colors"
+                        title="Edit account"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <HealthBadge health={acc.health} />
+                    </div>
                 </div>
 
                 {/* Details grid */}
@@ -266,8 +360,8 @@ export default function Accounts() {
         <div className="fixed inset-0 bg-ink/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-surface border border-border w-full max-w-lg rounded-xl shadow-xl flex flex-col max-h-[90vh]">
             <div className="flex justify-between items-center p-4 border-b border-border">
-              <h3 className="font-semibold text-lg text-ink">Create New Account</h3>
-              <button onClick={() => setIsAddingAccount(false)} className="text-ink-faint hover:text-ink p-1 rounded-md transition-colors"><X size={18} /></button>
+              <h3 className="font-semibold text-lg text-ink">{editingAccountId ? 'Edit Account' : 'Create New Account'}</h3>
+              <button onClick={() => { setIsAddingAccount(false); resetAccountForm(); }} className="text-ink-faint hover:text-ink p-1 rounded-md transition-colors"><X size={18} /></button>
             </div>
             
             <div className="p-4 overflow-y-auto">
@@ -296,12 +390,52 @@ export default function Accounts() {
                     <input type="number" min="0" step="10000" value={newAccountData.contractValue} onChange={e => setNewAccountData({...newAccountData, contractValue: e.target.value})} className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" />
                   </div>
                 </div>
+
+                <div className="space-y-2 border border-border rounded-xl p-3 bg-surface-alt/40">
+                  <label className="block text-xs font-semibold text-ink-soft uppercase tracking-wider">Account Template (PPTX/PDF)</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={accountTemplateName}
+                      onChange={(e) => setAccountTemplateName(e.target.value)}
+                      placeholder="Optional template label"
+                      className="flex-1 border border-border rounded-lg px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-2 border border-border rounded-lg text-xs font-semibold text-ink-soft hover:bg-surface transition-colors"
+                    >
+                      {accountTemplateFile ? 'Replace File' : 'Choose File'}
+                    </button>
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pptx,.pdf"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null;
+                      setAccountTemplateFile(file);
+                      if (file && !accountTemplateName.trim()) {
+                        setAccountTemplateName(file.name.replace(/\.[^/.]+$/, ''));
+                      }
+                    }}
+                    className="hidden"
+                  />
+                  {accountTemplateFile && (
+                    <p className="text-[11px] text-ink-faint">Selected: {accountTemplateFile.name}</p>
+                  )}
+                </div>
+
+                {accountTemplateStatus && (
+                  <p className="text-xs text-danger font-medium">{accountTemplateStatus}</p>
+                )}
               </form>
             </div>
             
             <div className="p-4 border-t border-border flex justify-end gap-3 bg-surface-alt rounded-b-xl">
-              <button type="button" onClick={() => setIsAddingAccount(false)} className="px-4 py-2 text-sm font-semibold text-ink-soft hover:text-ink transition-colors">Cancel</button>
-              <button type="submit" form="createAccountForm" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm">Create Account</button>
+              <button type="button" onClick={() => { setIsAddingAccount(false); resetAccountForm(); }} className="px-4 py-2 text-sm font-semibold text-ink-soft hover:text-ink transition-colors">Cancel</button>
+              <button type="submit" form="createAccountForm" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm">{editingAccountId ? 'Save Changes' : 'Create Account'}</button>
             </div>
           </div>
         </div>

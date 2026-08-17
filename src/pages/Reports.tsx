@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef } from 'react';
-import { FileText, Download, FileSpreadsheet, Presentation, File, Filter, Plus, Loader2, Check, UploadCloud } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { FileText, Download, FileSpreadsheet, Presentation, File, Filter, Plus, Loader2, Check } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { apiCreateReport, apiDownloadReport, apiListReportTemplates, apiUploadReportTemplate, apiListProviders, apiListReports } from '../services/api';
+import { apiCreateReport, apiDownloadReport, apiListReportTemplates, apiListProviders, apiListReports } from '../services/api';
 import type { Employee, GeneratedReport, ReportTemplate, LLMProvider } from '../types';
 import { getManageableEmployees, getManageableProjects, getProjectTeam } from '../utils/governance';
 
@@ -105,11 +105,6 @@ export default function Reports() {
   const [statusFrequency, setStatusFrequency] = useState<'all' | 'daily' | 'weekly' | 'monthly'>('weekly');
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-  const [uploadName, setUploadName] = useState('');
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [fileInputKey, setFileInputKey] = useState(0);
-  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [providers, setProviders] = useState<LLMProvider[]>([]);
   const [selectedProviderName, setSelectedProviderName] = useState<string>('');
   const [selectedProviderModel, setSelectedProviderModel] = useState<string | null>(null);
@@ -171,7 +166,6 @@ export default function Reports() {
 
   const currentProvider = providers.find((p) => p.name === selectedProviderName);
   const canGenerateReports = !!authToken && ['manager', 'program manager', 'studio head'].some(r => (currentUser?.roleCategory || '').toLowerCase() === r);
-  const canUploadTemplates = !!authToken && ['manager', 'program manager', 'studio head'].some(r => (currentUser?.roleCategory || '').toLowerCase() === r);
   const manageableProjects = getManageableProjects(currentUser, projects, allocations);
   const manageableAccountIds = new Set(manageableProjects.map((project) => project.accountId));
   const visibleAccounts = accounts.filter((account) => manageableAccountIds.has(account.id) || currentUser?.roleCategory === 'Studio Head');
@@ -532,88 +526,6 @@ export default function Reports() {
             </div>
           </div>
 
-          <div className="space-y-3 max-w-sm">
-            <label className="block text-xs font-semibold text-ink">Template name</label>
-            <input
-              value={uploadName}
-              onChange={(e) => setUploadName(e.target.value)}
-              placeholder="Leave blank to auto-fill from file name"
-              className="w-full text-xs px-3 py-2 rounded-lg border border-border bg-surface text-ink focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-            />
-          </div>
-          <input
-            ref={fileInputRef}
-            key={fileInputKey}
-            type="file"
-            accept=".pptx,.pdf"
-            disabled={!canUploadTemplates}
-            onChange={(e) => {
-              const file = e.target.files?.[0] ?? null;
-              setUploadFile(file);
-              if (file && !uploadName.trim()) {
-                setUploadName(file.name.replace(/\.[^/.]+$/, ""));
-              }
-            }}
-            className="hidden"
-          />
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            {uploadStatus && (
-              <div className="text-xs text-ink-soft">{uploadStatus}</div>
-            )}
-            <button
-              type="button"
-              disabled={!authToken || !canUploadTemplates}
-              onClick={async () => {
-                if (!authToken) {
-                  setUploadStatus('Please login before uploading templates.');
-                  return;
-                }
-                if (!canUploadTemplates) {
-                  setUploadStatus('Upload templates requires a Project Manager or higher role.');
-                  return;
-                }
-                if (!uploadFile) {
-                  fileInputRef.current?.click();
-                  return;
-                }
-                if (!uploadName.trim()) {
-                  setUploadStatus('Template name is required.');
-                  return;
-                }
-                const formData = new FormData();
-                formData.append('name', uploadName.trim());
-                const selectedAccount = accounts.find((acc) => acc.name === selectedScopeAccount);
-                if (selectedAccount?.id) formData.append('account_id', selectedAccount.id);
-                if (selectedProjectId) formData.append('project_id', selectedProjectId);
-                formData.append('file', uploadFile);
-                setUploadStatus('Uploading template...');
-                try {
-                  const created = await apiUploadReportTemplate(formData, authToken);
-                  setTemplates([created, ...templates]);
-                  setSelectedTemplateId(created.id);
-                  setUploadName('');
-                  setUploadFile(null);
-                  setFileInputKey((prev) => prev + 1);
-                  setUploadStatus('Template uploaded successfully.');
-                } catch (error) {
-                  console.error('Template upload failed:', error);
-                  setUploadStatus(error instanceof Error ? error.message : 'Template upload failed');
-                }
-              }}
-              className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition ${
-                !authToken || !canUploadTemplates
-                  ? 'bg-ink/10 text-ink-faint cursor-not-allowed border border-ink/20'
-                  : 'bg-blue-600 hover:bg-blue-700'
-              }`}
-            >
-              <UploadCloud size={16} /> {uploadFile ? 'Confirm Upload' : 'Upload Template'}
-            </button>
-          </div>
-          {!canUploadTemplates && (
-            <div className="text-xs text-ink-faint">
-              Template uploads are restricted to Project Managers and above. Sign in with a manager role to upload.
-            </div>
-          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">

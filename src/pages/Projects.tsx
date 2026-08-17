@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { 
   FolderKanban, Search, TrendingUp, Users, ChevronDown, ChevronUp, 
-  Plus, Trash2, Calendar, DollarSign, ClipboardList
+  Plus, Trash2, Calendar, DollarSign, ClipboardList, Pencil
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { apiCreateTask, apiListTasks } from '../services/api';
+import { apiCreateTask, apiListTasks, apiUpdateProject } from '../services/api';
 import type { DeliveryTask, Employee, TaskPriority } from '../types';
 
 type AllocationRoleKey = 'program' | 'projectManager' | 'architect' | 'developer' | 'qa' | 'devops' | 'intern';
@@ -58,6 +58,17 @@ export default function Projects() {
   const [newProjStartDate, setNewProjStartDate] = useState('');
   const [newProjManagerId, setNewProjManagerId] = useState('');
   const [newProjArchitectId, setNewProjArchitectId] = useState('');
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editProjName, setEditProjName] = useState('');
+  const [editProjClient, setEditProjClient] = useState('');
+  const [editProjAccount, setEditProjAccount] = useState('');
+  const [editProjPhase, setEditProjPhase] = useState<'Planning' | 'Development' | 'Beta Testing' | 'UAT' | 'Production' | 'Maintenance'>('Planning');
+  const [editProjBudget, setEditProjBudget] = useState<number>(1.0);
+  const [editProjDescription, setEditProjDescription] = useState('');
+  const [editProjTechStack, setEditProjTechStack] = useState('');
+  const [editProjStartDate, setEditProjStartDate] = useState('');
+  const [editProjManagerId, setEditProjManagerId] = useState('');
+  const [editProjArchitectId, setEditProjArchitectId] = useState('');
 
   // Form states for allocating resource
   const [isAllocateOpen, setIsAllocateOpen] = useState(false);
@@ -147,6 +158,77 @@ export default function Projects() {
     } catch (err) {
       console.error(err);
       showFeedback('error', 'Failed to create project.');
+    }
+  };
+
+  const openProjectEditor = (projectId: string) => {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project) return;
+    setEditingProjectId(projectId);
+    setEditProjName(project.name);
+    setEditProjClient(project.client);
+    setEditProjAccount(project.accountId);
+    setEditProjPhase(project.phase);
+    setEditProjBudget(project.budgetTotal);
+    setEditProjDescription(project.description);
+    setEditProjTechStack(project.techStack.join(', '));
+    setEditProjStartDate(project.startDate || '');
+    setEditProjManagerId(project.managerId || '');
+    setEditProjArchitectId(project.architectId || '');
+  };
+
+  const handleUpdateProjectSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!authToken || !editingProjectId) return;
+
+    try {
+      const updated = await apiUpdateProject(editingProjectId, {
+        account_id: editProjAccount,
+        name: editProjName,
+        phase: editProjPhase.toLowerCase().replace(' ', '_'),
+        client: editProjClient,
+        budget_total: editProjBudget,
+        program_manager_id: editProjManagerId || null,
+        project_manager_id: editProjManagerId || null,
+        team_lead_id: editProjArchitectId || null,
+        tech_stack: editProjTechStack ? editProjTechStack.split(',').map((item) => item.trim()).filter(Boolean) : [],
+        sprint_number: 1,
+        description: editProjDescription,
+        start_date: editProjStartDate || new Date().toISOString().split('T')[0],
+        completion_percent: 0,
+      }, authToken);
+
+      setProjects(projects.map((project) => project.id === editingProjectId ? {
+        ...project,
+        accountId: updated.account_id,
+        name: updated.name,
+        phase: updated.phase,
+        client: updated.client || project.client,
+        budgetTotal: Number(updated.budget_total || project.budgetTotal),
+        managerId: updated.project_manager_id || project.managerId,
+        architectId: updated.team_lead_id || project.architectId,
+        techStack: updated.tech_stack ? String(updated.tech_stack).split(',').map((item) => item.trim()).filter(Boolean) : project.techStack,
+        sprintNumber: updated.sprint_number || project.sprintNumber,
+        description: updated.description || project.description,
+        startDate: updated.start_date || project.startDate,
+        completionPercent: updated.completion_percent ?? project.completionPercent,
+      } : project));
+
+      showFeedback('success', `Updated project "${editProjName}" successfully.`);
+      setEditingProjectId(null);
+      setEditProjName('');
+      setEditProjClient('');
+      setEditProjAccount('');
+      setEditProjPhase('Planning');
+      setEditProjBudget(1.0);
+      setEditProjDescription('');
+      setEditProjTechStack('');
+      setEditProjStartDate('');
+      setEditProjManagerId('');
+      setEditProjArchitectId('');
+    } catch (err) {
+      console.error(err);
+      showFeedback('error', err instanceof Error ? err.message : 'Failed to update project.');
     }
   };
 
@@ -585,6 +667,86 @@ export default function Projects() {
             </form>
           )}
 
+          {editingProjectId && (
+            <form onSubmit={handleUpdateProjectSubmit} className="bg-surface border border-border rounded-xl p-6 shadow-sm space-y-4 animate-[slideDown_0.2s_ease]">
+              <h4 className="text-xs font-bold text-ink uppercase tracking-wider border-b border-border pb-1.5">Update Project Details</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                <div>
+                  <label className="block text-ink-soft mb-1 font-semibold">Project Name</label>
+                  <input type="text" required value={editProjName} onChange={(e) => setEditProjName(e.target.value)} className="w-full p-2 border border-border rounded-lg bg-surface text-ink focus:border-purple-600 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-ink-soft mb-1 font-semibold">Client Name</label>
+                  <input type="text" required value={editProjClient} onChange={(e) => setEditProjClient(e.target.value)} className="w-full p-2 border border-border rounded-lg bg-surface text-ink focus:border-purple-600 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-ink-soft mb-1 font-semibold">Corporate Account Map</label>
+                  <select value={editProjAccount} onChange={(e) => setEditProjAccount(e.target.value)} required className="w-full p-2 border border-border rounded-lg bg-surface text-ink focus:border-purple-600 outline-none cursor-pointer">
+                    <option value="">Select Account</option>
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.id}>{account.name} ({account.industry})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs">
+                <div>
+                  <label className="block text-ink-soft mb-1 font-semibold">Sprint Delivery Phase</label>
+                  <select value={editProjPhase} onChange={(e) => setEditProjPhase(e.target.value as any)} className="w-full p-2 border border-border rounded-lg bg-surface text-ink focus:border-purple-600 outline-none cursor-pointer">
+                    <option value="Planning">Planning</option>
+                    <option value="Development">Development</option>
+                    <option value="Beta Testing">Beta Testing</option>
+                    <option value="UAT">UAT</option>
+                    <option value="Production">Production</option>
+                    <option value="Maintenance">Maintenance</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-ink-soft mb-1 font-semibold">Budget Total ($M)</label>
+                  <input type="number" step="0.1" min="0.1" value={editProjBudget} onChange={(e) => setEditProjBudget(parseFloat(e.target.value) || 1.0)} className="w-full p-2 border border-border rounded-lg bg-surface text-ink focus:border-purple-600 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-ink-soft mb-1 font-semibold">Target Manager</label>
+                  <select value={editProjManagerId} onChange={(e) => setEditProjManagerId(e.target.value)} className="w-full p-2 border border-border rounded-lg bg-surface text-ink focus:border-purple-600 outline-none cursor-pointer">
+                    <option value="">Select Manager</option>
+                    {employees.filter((employee) => employee.roleCategory === 'Manager' || employee.roleCategory === 'Program Manager').map((manager) => (
+                      <option key={manager.id} value={manager.id}>{manager.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-ink-soft mb-1 font-semibold">Target Architect</label>
+                  <select value={editProjArchitectId} onChange={(e) => setEditProjArchitectId(e.target.value)} className="w-full p-2 border border-border rounded-lg bg-surface text-ink focus:border-purple-600 outline-none cursor-pointer">
+                    <option value="">Select Architect</option>
+                    {employees.filter((employee) => employee.roleCategory === 'Architect').map((architect) => (
+                      <option key={architect.id} value={architect.id}>{architect.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-ink-soft mb-1 font-semibold">Start Date</label>
+                  <input type="date" value={editProjStartDate} onChange={(e) => setEditProjStartDate(e.target.value)} className="w-full p-2 border border-border rounded-lg bg-surface text-ink focus:border-purple-600 outline-none" />
+                </div>
+              </div>
+
+              <div className="text-xs">
+                <label className="block text-ink-soft mb-1 font-semibold">Technology Stack (Comma separated)</label>
+                <input type="text" value={editProjTechStack} onChange={(e) => setEditProjTechStack(e.target.value)} placeholder="e.g. React, Node.js, AWS, Postgres" className="w-full p-2 border border-border rounded-lg bg-surface text-ink focus:border-purple-600 outline-none" />
+              </div>
+
+              <div className="text-xs">
+                <label className="block text-ink-soft mb-1 font-semibold">Project Description</label>
+                <textarea rows={2} value={editProjDescription} onChange={(e) => setEditProjDescription(e.target.value)} placeholder="Add detailed information about sprint targets..." className="w-full p-2.5 border border-border rounded-lg bg-surface text-ink focus:border-purple-600 outline-none" />
+              </div>
+
+              <div className="flex justify-end gap-2 text-xs pt-2">
+                <button type="button" onClick={() => setEditingProjectId(null)} className="px-4 py-2 border border-border rounded-lg text-ink hover:bg-surface-sunken cursor-pointer">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold cursor-pointer">Save Project</button>
+              </div>
+            </form>
+          )}
+
           {/* RESOURCE ALLOCATION FORM CONTAINER */}
           {isAllocateOpen && (
             <form onSubmit={handleAllocateSubmit} className="bg-surface border border-border rounded-xl p-6 shadow-sm space-y-4 animate-[slideDown_0.2s_ease]">
@@ -985,6 +1147,13 @@ export default function Projects() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => openProjectEditor(proj.id)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface-alt px-2 py-1 text-[10px] font-semibold text-ink-soft hover:text-ink hover:bg-surface transition-colors"
+                          >
+                            <Pencil size={12} /> Edit
+                          </button>
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${riskStyle(proj.risk)}`}>{proj.risk} Risk</span>
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600">Sprint {proj.sprintNumber}</span>
                           <button 
