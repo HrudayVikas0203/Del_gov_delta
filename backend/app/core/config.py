@@ -2,7 +2,7 @@
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from pydantic import Field, computed_field
+from pydantic import AliasChoices, Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,7 +40,18 @@ class Settings(BaseSettings):
     mysql_password: str = "password"
     mysql_database: str = "delivery_governance"
 
-    backend_cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    backend_cors_origins: str = (
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "https://del-gov-delta-k2zs.vercel.app,https://del-gov-delta.vercel.app"
+    )
+    cors_origin_regex: str | None = Field(
+        default=r"https://.*\.vercel\.app",
+        validation_alias=AliasChoices(
+            "cors_origin_regex",
+            "CORS_ORIGIN_REGEX",
+            "CORS_ALLOW_ORIGIN_REGEX",
+        ),
+    )
 
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/1"
