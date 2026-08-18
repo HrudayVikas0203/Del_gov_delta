@@ -107,7 +107,7 @@ if os.getenv("DB_DEBUG", "").strip().lower() == "true":
         print(f"SSL_CHECK_HOSTNAME={bool(ssl_cfg.get('check_hostname'))}")
         print(f"SSL_VERIFY_MODE={ssl_cfg.get('verify_mode')}")
 
-engine = create_engine(str(url), pool_pre_ping=True, pool_recycle=280, future=True, connect_args=connect_args)
+engine = create_engine(url, pool_pre_ping=True, pool_recycle=280, future=True, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
