@@ -4,6 +4,7 @@ from urllib.parse import quote_plus
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -89,9 +90,28 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     from_email: str | None = None
 
+    @staticmethod
+    def normalize_database_url(raw_url: str | None) -> str | None:
+        if not raw_url or not raw_url.strip():
+            return raw_url
+
+        candidate = raw_url.strip()
+        try:
+            parsed = make_url(candidate)
+        except Exception:
+            return candidate
+
+        driver = parsed.drivername.lower()
+        if driver in {"mysql", "mysql+mysqldb"}:
+            return str(parsed.set(drivername="mysql+pymysql"))
+        if driver == "mysql+pymysql":
+            return candidate
+        return candidate
+
     @model_validator(mode="after")
     def resolve_database_url(self) -> "Settings":
         if self.database_url and self.database_url.strip():
+            self.database_url = self.normalize_database_url(self.database_url)
             return self
 
         if self.environment.lower() == "production":
@@ -105,7 +125,7 @@ class Settings(BaseSettings):
 
         user = quote_plus(self.mysql_user)
         password = quote_plus(self.mysql_password)
-        self.database_url = (
+        self.database_url = self.normalize_database_url(
             f"mysql+pymysql://{user}:{password}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}?charset=utf8mb4"
         )
