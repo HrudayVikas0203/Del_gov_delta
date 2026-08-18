@@ -1,6 +1,9 @@
-﻿from functools import lru_cache
+﻿import hashlib
+import logging
+import os
+from functools import lru_cache
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,6 +12,7 @@ from sqlalchemy.engine import make_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+LOGGER = logging.getLogger(__name__)
 
 
 def resolve_app_path(value: str) -> Path:
@@ -26,6 +30,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
     app_name: str = "Delivery Governance Backend"
@@ -36,7 +41,7 @@ class Settings(BaseSettings):
 
     database_url: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("DATABASE_URL", "database_url"),
+        validation_alias=AliasChoices("database_url", "DATABASE_URL"),
         description="SQLAlchemy connection URL used by the active environment.",
     )
     database_backend: str = "sqlite"
@@ -150,13 +155,44 @@ class Settings(BaseSettings):
             self.database_url = f"sqlite:///{path.as_posix()}"
             return self
 
-        user = quote_plus(self.mysql_user)
-        password = quote_plus(self.mysql_password)
+        user = quote(self.mysql_user, safe="")
+        password = quote(self.mysql_password, safe="")
         self.database_url = self.normalize_database_url(
             f"mysql+pymysql://{user}:{password}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}?charset=utf8mb4"
         )
         return self
+
+    def get_database_diagnostics(self) -> dict[str, object]:
+        url = self.database_url or ""
+        parsed = None
+        if url:
+            try:
+                parsed = make_url(url)
+            except Exception:
+                parsed = None
+
+        password = parsed.password if parsed is not None else ""
+        password_present = bool(password)
+        password_length = len(password) if password is not None else 0
+
+        data: dict[str, object] = {
+            "DATABASE_URL present": bool(url),
+            "DATABASE_URL length": len(url),
+            "Database driver": parsed.drivername if parsed is not None else "",
+            "Database host": parsed.host if parsed is not None else "",
+            "Database port": parsed.port if parsed is not None else "",
+            "Database name": parsed.database if parsed is not None else "",
+            "Database username": parsed.username if parsed is not None else "",
+            "Password present": password_present,
+            "Password length": password_length,
+            "Environment": self.environment,
+        }
+
+        if password:
+            data["Password fingerprint"] = hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+        return data
 
     @property
     def cors_origins(self) -> list[str]:
@@ -173,6 +209,31 @@ class Settings(BaseSettings):
         path = resolve_app_path(self.report_templates_dir)
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+
+def log_database_diagnostics(settings: Settings) -> None:
+    if os.getenv("DB_DEBUG", "").lower() != "true":
+        return
+
+    diagnostics = settings.get_database_diagnostics()
+    LOGGER.warning(
+        "Database diagnostics: DATABASE_URL present=%s DATABASE_URL length=%s Database driver=%s "
+        "Database host=%s Database port=%s Database name=%s Database username=%s "
+        "Password present=%s Password length=%s Environment=%s",
+        diagnostics["DATABASE_URL present"],
+        diagnostics["DATABASE_URL length"],
+        diagnostics["Database driver"],
+        diagnostics["Database host"],
+        diagnostics["Database port"],
+        diagnostics["Database name"],
+        diagnostics["Database username"],
+        diagnostics["Password present"],
+        diagnostics["Password length"],
+        diagnostics["Environment"],
+    )
+
+    if "Password fingerprint" in diagnostics:
+        LOGGER.warning("Password fingerprint: %s", diagnostics["Password fingerprint"])
 
 
 @lru_cache

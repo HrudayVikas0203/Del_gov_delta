@@ -4,10 +4,9 @@ from fastapi import FastAPI
 from flask import Flask, jsonify
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.wsgi import WSGIMiddleware
-from app.api.v1.router import api_router
 
 from app.api.v1.router import api_router
-from app.core.config import get_settings
+from app.core.config import get_settings, log_database_diagnostics
 from app.db.schema import ensure_schema_upgrades
 from app.db.seed import seed
 from app.db.session import Base, engine
@@ -26,6 +25,7 @@ def create_flask_ops_app() -> Flask:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    log_database_diagnostics(settings)
     app = FastAPI(title=settings.app_name, version="1.0.0")
     app.add_middleware(
         CORSMiddleware,
