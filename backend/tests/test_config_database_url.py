@@ -1,3 +1,4 @@
+import hashlib
 import os
 
 from sqlalchemy.engine import make_url
@@ -77,3 +78,30 @@ def test_database_url_explicit_render_override(monkeypatch):
     assert diagnostics["Database username"] == "avnadmin"
     assert diagnostics["Password present"] is True
     assert diagnostics["Password length"] == len("RenderPassword!2024")
+
+
+def test_database_url_debug_logs_password_fingerprint(monkeypatch, capsys):
+    fake_password = "fake-password-123"
+    monkeypatch.setenv("DB_DEBUG", "true")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        f"mysql+pymysql://avnadmin:{fake_password}@mysql-20d84f9-hrudayvikas2004-cd10.a.aivencloud.com:13207/defaultdb?charset=utf8mb4",
+    )
+    monkeypatch.delenv("MYSQL_HOST", raising=False)
+    monkeypatch.delenv("MYSQL_PORT", raising=False)
+    monkeypatch.delenv("MYSQL_USER", raising=False)
+    monkeypatch.delenv("MYSQL_PASSWORD", raising=False)
+    monkeypatch.delenv("MYSQL_DATABASE", raising=False)
+
+    settings = Settings()
+    parsed = make_url(settings.database_url)
+    assert parsed.password == fake_password
+
+    output = capsys.readouterr().out
+    expected_hash = hashlib.sha256(fake_password.encode("utf-8")).hexdigest()
+    assert f"DATABASE_PASSWORD_SHA256={expected_hash}" in output
+    assert f"DATABASE_PASSWORD_LENGTH={len(fake_password)}" in output
+    assert fake_password not in output
+    assert "DATABASE_URL=" not in output
+    assert "mysql+pymysql://avnadmin:" not in output

@@ -43,6 +43,7 @@ def log_database_debug(settings: "Settings") -> None:
     print(f"DATABASE_USERNAME={username}")
     print(f"DATABASE_PASSWORD_PRESENT={bool(password)}")
     print(f"DATABASE_PASSWORD_LENGTH={len(password) if password else 0}")
+    print(f"DATABASE_PASSWORD_SHA256={hashlib.sha256(password.encode('utf-8')).hexdigest() if password else ''}")
     print(f"ENVIRONMENT={settings.environment}")
 
 
