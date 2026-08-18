@@ -1,8 +1,10 @@
+import hashlib
 import os
 import ssl
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy.engine import make_url
 
 from app.core.config import Settings
 from app.db.session import build_mysql_connect_args
@@ -116,3 +118,19 @@ def test_direct_pymysql_uses_secure_ssl_configuration_from_env(monkeypatch) -> N
     assert kwargs["ssl"] is not None
     assert kwargs["ssl"]["check_hostname"] is True
     assert kwargs["ssl"]["verify_mode"] == ssl.CERT_REQUIRED
+
+
+def test_database_url_preserves_password_with_reserved_characters(monkeypatch) -> None:
+    password = "R3nd3r@Pass+2024?two#hash"
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        f"mysql+pymysql://avnadmin:{password}@mysql-20d84f9-hrudayvikas2004-cd10.a.aivencloud.com:13207/defaultdb?charset=utf8mb4",
+    )
+
+    settings = Settings()
+    parsed = make_url(settings.database_url)
+
+    assert parsed.password == password
+    assert hashlib.sha256(parsed.password.encode("utf-8")).hexdigest() == hashlib.sha256(password.encode("utf-8")).hexdigest()
+    assert "@mysql-20d84f9-hrudayvikas2004-cd10.a.aivencloud.com" in settings.database_url

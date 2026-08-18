@@ -1,9 +1,9 @@
-﻿import hashlib
+import hashlib
 import logging
 import os
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -146,10 +146,24 @@ class Settings(BaseSettings):
             return raw_url
 
         candidate = raw_url.strip()
+
+        if "://" in candidate and "@" in candidate:
+            scheme, remainder = candidate.split("://", 1)
+            if "@" in remainder:
+                userinfo, host_and_path = remainder.rsplit("@", 1)
+                if ":" in userinfo:
+                    username, password = userinfo.split(":", 1)
+                    encoded_username = quote(unquote(username), safe="")
+                    encoded_password = quote(unquote(password), safe="")
+                    candidate = f"{scheme}://{encoded_username}:{encoded_password}@{host_and_path}"
+                else:
+                    encoded_username = quote(unquote(userinfo), safe="")
+                    candidate = f"{scheme}://{encoded_username}@{host_and_path}"
+
         try:
             parsed = make_url(candidate)
         except Exception:
-            return candidate
+            return raw_url
 
         query: dict[str, str] = dict(parsed.query)
         for key in list(query):

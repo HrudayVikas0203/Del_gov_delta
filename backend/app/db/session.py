@@ -1,4 +1,5 @@
-﻿import os
+import hashlib
+import os
 import ssl as ssl_module
 import tempfile
 from collections.abc import Generator
@@ -69,6 +70,42 @@ connect_args: dict[str, object] = {"check_same_thread": False} if url.get_backen
 
 if url.get_backend_name() == "mysql":
     connect_args.update(build_mysql_connect_args())
+
+if os.getenv("DB_DEBUG", "").strip().lower() == "true":
+    env_url = (os.getenv("DATABASE_URL") or "").strip()
+    env_password = ""
+    if env_url:
+        try:
+            env_url_parsed = make_url(env_url)
+            env_password = env_url_parsed.password or ""
+        except Exception:
+            env_password = ""
+
+    sql_password = url.password or ""
+    env_fingerprint = hashlib.sha256(env_password.encode("utf-8")).hexdigest() if env_password else ""
+    sql_fingerprint = hashlib.sha256(sql_password.encode("utf-8")).hexdigest() if sql_password else ""
+
+    print(f"DATABASE_CONFIG_SOURCE={'DATABASE_URL' if env_url else 'MYSQL_FIELDS'}")
+    print(f"DATABASE_DRIVER={url.drivername}")
+    print(f"DATABASE_HOST={url.host}")
+    print(f"DATABASE_PORT={url.port}")
+    print(f"DATABASE_NAME={url.database}")
+    print(f"DATABASE_USERNAME={url.username}")
+    print(f"DATABASE_PASSWORD_PRESENT={bool(sql_password)}")
+    print(f"DATABASE_PASSWORD_LENGTH={len(sql_password)}")
+    print(f"DATABASE_PASSWORD_SHA256={sql_fingerprint}")
+    print(f"SQLALCHEMY_URL_PASSWORD_PRESENT={bool(sql_password)}")
+    print(f"SQLALCHEMY_URL_PASSWORD_LENGTH={len(sql_password)}")
+    print(f"SQLALCHEMY_URL_PASSWORD_SHA256={sql_fingerprint}")
+    print(f"DATABASE_URL_PASSWORD_SHA256={env_fingerprint}")
+    print(f"DATABASE_URL_PASSWORD_MATCH={sql_fingerprint == env_fingerprint}")
+    print(f"CONNECT_ARGS_KEYS={list(connect_args.keys())}")
+    ssl_cfg = connect_args.get("ssl") if isinstance(connect_args.get("ssl"), dict) else None
+    print(f"SSL_CONFIG_PRESENT={ssl_cfg is not None}")
+    if ssl_cfg is not None:
+        print(f"SSL_CA_PRESENT={bool(ssl_cfg.get('ca'))}")
+        print(f"SSL_CHECK_HOSTNAME={bool(ssl_cfg.get('check_hostname'))}")
+        print(f"SSL_VERIFY_MODE={ssl_cfg.get('verify_mode')}")
 
 engine = create_engine(str(url), pool_pre_ping=True, pool_recycle=280, future=True, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
