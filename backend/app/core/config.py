@@ -46,9 +46,18 @@ class Settings(BaseSettings):
     mysql_user: str = "root"
     mysql_password: str = "password"
     mysql_database: str = "delivery_governance"
-    mysql_ssl_ca: str | None = None
-    mysql_ssl_cert: str | None = None
-    mysql_ssl_key: str | None = None
+    mysql_ssl_ca: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MYSQL_SSL_CA", "mysql_ssl_ca", "SSL_CA", "CA_CERT", "AIVEN_CA_CERT"),
+    )
+    mysql_ssl_cert: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MYSQL_SSL_CERT", "mysql_ssl_cert", "SSL_CERT", "CLIENT_CERT"),
+    )
+    mysql_ssl_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MYSQL_SSL_KEY", "mysql_ssl_key", "SSL_KEY", "CLIENT_KEY"),
+    )
 
     backend_cors_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
@@ -101,12 +110,30 @@ class Settings(BaseSettings):
         except Exception:
             return candidate
 
+        query: dict[str, str] = dict(parsed.query)
+        for key in list(query):
+            normalized_key = key.lower()
+            if normalized_key in {
+                "ssl",
+                "ssl-mode",
+                "ssl_mode",
+                "ssl-ca",
+                "ssl_ca",
+                "ssl-cert",
+                "ssl_cert",
+                "ssl-key",
+                "ssl_key",
+            }:
+                query.pop(key, None)
+
         driver = parsed.drivername.lower()
         if driver in {"mysql", "mysql+mysqldb"}:
-            return str(parsed.set(drivername="mysql+pymysql"))
-        if driver == "mysql+pymysql":
-            return candidate
-        return candidate
+            parsed = parsed.set(drivername="mysql+pymysql")
+        if query:
+            parsed = parsed.set(query=query)
+        else:
+            parsed = parsed.set(query={})
+        return str(parsed)
 
     @model_validator(mode="after")
     def resolve_database_url(self) -> "Settings":
