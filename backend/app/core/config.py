@@ -2,7 +2,7 @@
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from pydantic import AliasChoices, Field, computed_field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,7 @@ class Settings(BaseSettings):
         env_file=("backend/.env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
+        case_sensitive=False,
     )
 
     app_name: str = "Delivery Governance Backend"
@@ -32,6 +33,11 @@ class Settings(BaseSettings):
     secret_key: str = Field(default="change-this-in-production")
     access_token_expire_minutes: int = 480
 
+    database_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("DATABASE_URL", "database_url"),
+        description="SQLAlchemy connection URL used by the active environment.",
+    )
     database_backend: str = "sqlite"
     sqlite_database: str = "backend/storage/delivery_governance.db"
     mysql_host: str = "127.0.0.1"
@@ -39,6 +45,9 @@ class Settings(BaseSettings):
     mysql_user: str = "root"
     mysql_password: str = "password"
     mysql_database: str = "delivery_governance"
+    mysql_ssl_ca: str | None = None
+    mysql_ssl_cert: str | None = None
+    mysql_ssl_key: str | None = None
 
     backend_cors_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
@@ -80,20 +89,27 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     from_email: str | None = None
 
-    @computed_field
-    @property
-    def database_url(self) -> str:
+    @model_validator(mode="after")
+    def resolve_database_url(self) -> "Settings":
+        if self.database_url and self.database_url.strip():
+            return self
+
+        if self.environment.lower() == "production":
+            raise ValueError("DATABASE_URL environment variable is not configured.")
+
         if self.database_backend.lower() == "sqlite":
             path = resolve_app_path(self.sqlite_database)
             path.parent.mkdir(parents=True, exist_ok=True)
-            return f"sqlite:///{path.as_posix()}"
+            self.database_url = f"sqlite:///{path.as_posix()}"
+            return self
 
         user = quote_plus(self.mysql_user)
         password = quote_plus(self.mysql_password)
-        return (
+        self.database_url = (
             f"mysql+pymysql://{user}:{password}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}?charset=utf8mb4"
         )
+        return self
 
     @property
     def cors_origins(self) -> list[str]:
