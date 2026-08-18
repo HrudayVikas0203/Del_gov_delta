@@ -138,7 +138,7 @@ class Settings(BaseSettings):
             parsed = parsed.set(query=query)
         else:
             parsed = parsed.set(query={})
-        return str(parsed)
+        return parsed.render_as_string(hide_password=False)
 
     @model_validator(mode="after")
     def resolve_database_url(self) -> "Settings":

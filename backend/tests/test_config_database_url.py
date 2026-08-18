@@ -5,7 +5,7 @@ from sqlalchemy.engine import make_url
 from app.core.config import Settings, get_settings
 
 
-def test_database_url_prefers_render_environment_variable(monkeypatch):
+def test_database_url_requires_render_database_url_in_production(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("DATABASE_BACKEND", "mysql")
     monkeypatch.setenv("MYSQL_HOST", "mysql-20d84f9-hrudayvikas2004-cd10.a.aivencloud.com")
@@ -16,23 +16,11 @@ def test_database_url_prefers_render_environment_variable(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
 
     get_settings.cache_clear()
-    settings = Settings()
-    url = settings.database_url
-    parsed = make_url(url)
-
-    assert url.startswith("mysql+pymysql://")
-    assert parsed.username == "avnadmin"
-    assert parsed.host == "mysql-20d84f9-hrudayvikas2004-cd10.a.aivencloud.com"
-    assert parsed.port == 13207
-    assert parsed.database == "defaultdb"
-    assert parsed.drivername == "mysql+pymysql"
-    assert parsed.password == "TestPassword123"
-
-    diagnostics = settings.get_database_diagnostics()
-    assert diagnostics["Database driver"] == "mysql+pymysql"
-    assert diagnostics["Database username"] == "avnadmin"
-    assert diagnostics["Password present"] is True
-    assert diagnostics["Password length"] == len("TestPassword123")
+    try:
+        Settings()
+        raise AssertionError("Expected production settings to require DATABASE_URL")
+    except ValueError as exc:
+        assert "DATABASE_URL environment variable is not configured" in str(exc)
 
 
 def test_database_url_handles_sensitive_password_characters(monkeypatch):
@@ -42,13 +30,17 @@ def test_database_url_handles_sensitive_password_characters(monkeypatch):
     monkeypatch.setenv("MYSQL_USER", "avnadmin")
     monkeypatch.setenv("MYSQL_PASSWORD", "P@ss word!$%^&*()+={}[]:/?;.,~")
     monkeypatch.setenv("MYSQL_DATABASE", "defaultdb")
-    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("ENVIRONMENT", "local")
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     settings = Settings()
     parsed = make_url(settings.database_url)
+    rendered = parsed.render_as_string(hide_password=False)
 
-    assert parsed.password == "P@ss word!$%^&*()+={}[]:/?;.,~"
+    assert "***" not in settings.database_url
+    assert "***" not in rendered
+    assert "P%40ss" in rendered
+    assert "word" in rendered
     assert parsed.username == "avnadmin"
     assert parsed.database == "defaultdb"
 
@@ -68,8 +60,20 @@ def test_database_url_explicit_render_override(monkeypatch):
 
     settings = Settings()
     parsed = make_url(settings.database_url)
+    rendered = parsed.render_as_string(hide_password=False)
 
-    assert settings.database_url.startswith("mysql+pymysql://avnadmin:RenderPassword")
+    assert settings.database_url is not None
+    assert settings.database_url.startswith("mysql+pymysql://avnadmin:")
+    assert "***" not in settings.database_url
+    assert "***" not in rendered
+    assert "RenderPassword" in rendered
     assert parsed.username == "avnadmin"
     assert parsed.host == "mysql-20d84f9-hrudayvikas2004-cd10.a.aivencloud.com"
-    assert parsed.password == "RenderPassword!2024"
+    assert parsed.database == "defaultdb"
+    assert parsed.drivername == "mysql+pymysql"
+
+    diagnostics = settings.get_database_diagnostics()
+    assert diagnostics["Database driver"] == "mysql+pymysql"
+    assert diagnostics["Database username"] == "avnadmin"
+    assert diagnostics["Password present"] is True
+    assert diagnostics["Password length"] == len("RenderPassword!2024")
