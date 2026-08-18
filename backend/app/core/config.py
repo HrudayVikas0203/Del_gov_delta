@@ -15,6 +15,37 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 LOGGER = logging.getLogger(__name__)
 
 
+def log_database_debug(settings: "Settings") -> None:
+    if os.getenv("DB_DEBUG", "").strip().lower() != "true":
+        return
+
+    env_url = (os.getenv("DATABASE_URL") or "").strip()
+    display_url = (settings.database_url or "").strip()
+    source = "DATABASE_URL" if env_url else "MYSQL_FIELDS"
+    parsed = make_url(env_url) if env_url else None
+    if parsed is None and display_url:
+        parsed = make_url(display_url)
+
+    password = parsed.password if parsed is not None and parsed.password is not None else None
+    driver = parsed.drivername if parsed is not None and parsed.drivername else "mysql+pymysql"
+    host = parsed.host if parsed is not None and parsed.host else settings.mysql_host
+    port = parsed.port if parsed is not None and parsed.port is not None else settings.mysql_port
+    database = parsed.database if parsed is not None and parsed.database else settings.mysql_database
+    username = parsed.username if parsed is not None and parsed.username else settings.mysql_user
+
+    print(f"DATABASE_CONFIG_SOURCE={source}")
+    print(f"DATABASE_URL_PRESENT={bool(env_url or display_url)}")
+    print(f"DATABASE_URL_LENGTH={len(env_url or display_url)}")
+    print(f"DATABASE_DRIVER={driver}")
+    print(f"DATABASE_HOST={host}")
+    print(f"DATABASE_PORT={port}")
+    print(f"DATABASE_NAME={database}")
+    print(f"DATABASE_USERNAME={username}")
+    print(f"DATABASE_PASSWORD_PRESENT={bool(password)}")
+    print(f"DATABASE_PASSWORD_LENGTH={len(password) if password else 0}")
+    print(f"ENVIRONMENT={settings.environment}")
+
+
 def resolve_app_path(value: str) -> Path:
     path = Path(value)
     if path.is_absolute():
@@ -32,6 +63,10 @@ class Settings(BaseSettings):
         case_sensitive=False,
         populate_by_name=True,
     )
+
+    def __init__(self, **values):
+        super().__init__(**values)
+        log_database_debug(self)
 
     app_name: str = "Delivery Governance Backend"
     environment: str = "local"
