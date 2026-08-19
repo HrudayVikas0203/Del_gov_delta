@@ -8,7 +8,6 @@ from starlette.middleware.wsgi import WSGIMiddleware
 from app.api.v1.router import api_router
 from app.core.config import get_settings, log_database_diagnostics
 from app.db.schema import ensure_schema_upgrades
-from app.db.seed import seed
 from app.db.session import Base, engine
 from app.services.email import dispatch_due_scheduled_emails
 
@@ -40,7 +39,6 @@ def create_app() -> FastAPI:
     def ensure_schema() -> None:
         Base.metadata.create_all(bind=engine)
         ensure_schema_upgrades()
-        seed()
 
     @app.on_event("startup")
     async def start_email_dispatcher() -> None:

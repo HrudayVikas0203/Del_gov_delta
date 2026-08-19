@@ -102,7 +102,8 @@ class Settings(BaseSettings):
 
     backend_cors_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
-        "https://del-gov-delta-k2zs.vercel.app,https://del-gov-delta.vercel.app"
+        "https://del-gov-delta-k2zs.vercel.app,https://del-gov-delta.vercel.app,"
+        "https://del-gov-delta-gsdfuadmr-hrudayvikas2004-9161s-projects.vercel.app"
     )
     cors_origin_regex: str | None = Field(
         default=r"https://.*\.vercel\.app",
