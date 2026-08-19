@@ -1,10 +1,13 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV
+  ? 'http://127.0.0.1:8000'
+  : 'https://del-gov-delta.onrender.com');
+const API_PATH_PREFIX = '/api/v1';
 
 function buildUrl(path: string) {
   if (!path.startsWith('/')) {
     path = `/${path}`;
   }
-  return `${API_BASE_URL}${path}`;
+  return `${API_BASE_URL}${API_PATH_PREFIX}${path}`;
 }
 
 function buildHeaders(token?: string, contentType?: string) {
