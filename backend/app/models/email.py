@@ -24,6 +24,7 @@ class ScheduledEmail(Base):
     recipients: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     subject: Mapped[str] = mapped_column(String(255), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    html_body: Mapped[str | None] = mapped_column(Text)
     email_type: Mapped[str] = mapped_column(String(80), nullable=False, default="project_update")
     task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), index=True)

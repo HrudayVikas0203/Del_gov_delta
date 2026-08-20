@@ -256,12 +256,19 @@ class TaskApprovalAction(BaseModel):
 
 class ScheduledEmailCreate(BaseModel):
     recipients: list[EmailStr]
-    subject: str = Field(min_length=3, max_length=255)
-    body: str = Field(min_length=1)
-    email_type: str = "project_update"
+    subject: str | None = Field(default=None, min_length=3, max_length=255)
+    body: str | None = Field(default=None, min_length=1)
+    email_type: str = Field(default="custom", min_length=1, max_length=80)
     delivery: str = Field(default="schedule", pattern="^(send_now|schedule)$")
     task_id: str | None = None
     project_id: str | None = None
+    scheduled_at: datetime | None = None
+
+
+class ScheduledEmailUpdate(BaseModel):
+    recipients: list[EmailStr] | None = None
+    subject: str | None = Field(default=None, min_length=3, max_length=255)
+    body: str | None = Field(default=None, min_length=1)
     scheduled_at: datetime | None = None
 
 

@@ -10,9 +10,9 @@ from app.models.delivery import Project
 from app.models.email import EmailStatus, ScheduledEmail
 from app.models.people import Employee, Role
 from app.models.tasks import Task
-from app.schemas.common import ScheduledEmailCreate, ScheduledEmailOut
+from app.schemas.common import ScheduledEmailCreate, ScheduledEmailOut, ScheduledEmailUpdate
 from app.services.audit import audit
-from app.services.email import dispatch_due_scheduled_emails, send_email_record, smtp_is_configured
+from app.services.email import dispatch_due_scheduled_emails, render_template, send_email_record, smtp_is_configured, template_names
 
 router = APIRouter(prefix="/emails", tags=["email-scheduling"])
 
@@ -20,6 +20,11 @@ router = APIRouter(prefix="/emails", tags=["email-scheduling"])
 @router.get("/config", response_model=dict)
 def email_config(_: Employee = Depends(get_current_user)) -> dict:
     return {"smtp_configured": smtp_is_configured()}
+
+
+@router.get("/templates", response_model=list[dict])
+def email_templates(_: Employee = Depends(get_current_user)) -> list[dict]:
+    return template_names()
 
 
 @router.get("", response_model=list[ScheduledEmailOut])
@@ -36,10 +41,16 @@ def schedule_email(
     db: Session = Depends(get_db),
     actor: Employee = Depends(require_min_role(Role.TEAM_LEAD)),
 ) -> ScheduledEmail:
-    if payload.task_id and not db.get(Task, payload.task_id):
+    task = db.get(Task, payload.task_id) if payload.task_id else None
+    if payload.task_id and not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if payload.project_id and not db.get(Project, payload.project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    generated_subject, generated_body, html_body = render_template(payload.email_type, task, actor)
+    subject = payload.subject or generated_subject
+    body = payload.body or generated_body
+    if not subject or not body:
+        raise HTTPException(status_code=400, detail="Subject and body are required for a custom email")
     scheduled_at = payload.scheduled_at
     if scheduled_at and scheduled_at.tzinfo is None:
         scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
@@ -53,13 +64,14 @@ def schedule_email(
     email = ScheduledEmail(
         sender_id=actor.id,
         recipients=[str(recipient) for recipient in payload.recipients],
-        subject=payload.subject,
-        body=payload.body,
+        subject=subject,
+        body=body,
         email_type=payload.email_type,
         task_id=payload.task_id,
         project_id=payload.project_id,
         scheduled_at=scheduled_at,
         status=status,
+        html_body=html_body,
     )
     db.add(email)
     audit(db, actor.id, "Email Scheduled" if status == EmailStatus.SCHEDULED else "Email Queued", "Email Scheduling", payload.subject)
