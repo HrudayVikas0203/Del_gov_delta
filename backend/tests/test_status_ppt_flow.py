@@ -9,6 +9,7 @@ from pptx import Presentation
 
 from app.core.config import get_settings
 from app.db.seed import seed
+from app.db.schema import ensure_schema_upgrades
 from app.db.session import Base, SessionLocal, engine
 from app.models.delivery import Account, Project
 from app.models.status import WeeklyStatus, ReportTemplate
@@ -19,6 +20,7 @@ from app.main import app
 def test_account_project_allocation_status_and_ppt_flow() -> None:
     get_settings.cache_clear()
     Base.metadata.create_all(bind=engine)
+    ensure_schema_upgrades()
     seed()
     suffix = uuid.uuid4().hex[:8]
     account_name = f"Northwind Capital {suffix}"
@@ -140,6 +142,7 @@ def test_account_project_allocation_status_and_ppt_flow() -> None:
 def test_account_template_is_auto_selected_for_project_reports() -> None:
     get_settings.cache_clear()
     Base.metadata.create_all(bind=engine)
+    ensure_schema_upgrades()
     seed()
 
     client = TestClient(app)
@@ -199,8 +202,7 @@ def test_account_template_is_auto_selected_for_project_reports() -> None:
 
     with template_path.open("rb") as file_handle:
         template_resp = client.post(
-            "/api/v1/reports/templates",
-            data={"name": "Account Template", "account_id": account_id},
+            f"/api/v1/governance/accounts/{account_id}/template",
             files={"file": (template_path.name, file_handle, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
             headers=headers,
         )
@@ -238,9 +240,100 @@ def test_account_template_is_auto_selected_for_project_reports() -> None:
     assert any(project_name in chunk for chunk in text_chunks)
 
 
+def test_account_template_replace_remove_and_project_isolation() -> None:
+    get_settings.cache_clear()
+    Base.metadata.create_all(bind=engine)
+    ensure_schema_upgrades()
+    seed()
+
+    client = TestClient(app)
+    login_resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "gowtham.rallabandi@delta.com", "password": "Demo@123"},
+    )
+    assert login_resp.status_code == 200, login_resp.text
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+    def create_account(name: str) -> str:
+        response = client.post(
+            "/api/v1/governance/accounts",
+            json={"name": name, "industry": "Finance", "country": "USA", "business_unit": "Banking"},
+            headers=headers,
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    def create_project(account_id: str, name: str) -> str:
+        response = client.post(
+            "/api/v1/governance/projects",
+            json={"account_id": account_id, "name": name, "phase": "development", "client": name},
+            headers=headers,
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    def make_template(path: Path, marker: str) -> None:
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[0])
+        slide.shapes.title.text = "{{ACCOUNT_NAME}}"
+        body = slide.shapes.add_textbox(1.5, 2.0, 8, 2.2)
+        body.text_frame.text = f"{{{{PROJECT_NAME}}}} {marker}"
+        prs.save(path)
+
+    account_a = create_account(f"Template A {uuid.uuid4().hex[:8]}")
+    account_b = create_account(f"Template B {uuid.uuid4().hex[:8]}")
+    project_a = create_project(account_a, f"Project A {uuid.uuid4().hex[:8]}")
+    project_b = create_project(account_b, f"Project B {uuid.uuid4().hex[:8]}")
+
+    template_a = Path("/tmp") / f"template-a-{uuid.uuid4().hex}.pptx"
+    template_a_replacement = Path("/tmp") / f"template-a-replacement-{uuid.uuid4().hex}.pptx"
+    template_b = Path("/tmp") / f"template-b-{uuid.uuid4().hex}.pptx"
+    make_template(template_a, "A")
+    make_template(template_a_replacement, "A-REPLACED")
+    make_template(template_b, "B")
+
+    def upload(account_id: str, path: Path) -> str:
+        with path.open("rb") as handle:
+            response = client.post(
+                f"/api/v1/governance/accounts/{account_id}/template",
+                files={"file": (path.name, handle, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+                headers=headers,
+            )
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    template_a_id = upload(account_a, template_a)
+    assert upload(account_a, template_a_replacement) == template_a_id
+    template_b_id = upload(account_b, template_b)
+    assert template_a_id != template_b_id
+
+    report_a = client.post(
+        "/api/v1/reports",
+        json={"title": "A report", "report_type": "project_report", "report_format": "pptx", "scope": f"project:{project_a}", "project_id": project_a, "use_celery": False},
+        headers=headers,
+    )
+    report_b = client.post(
+        "/api/v1/reports",
+        json={"title": "B report", "report_type": "project_report", "report_format": "pptx", "scope": f"project:{project_b}", "project_id": project_b, "use_celery": False},
+        headers=headers,
+    )
+    assert report_a.status_code == 201, report_a.text
+    assert report_b.status_code == 201, report_b.text
+    assert report_a.json()["template_id"] == template_a_id
+    assert report_b.json()["template_id"] == template_b_id
+
+    remove_response = client.delete(f"/api/v1/governance/accounts/{account_a}/template", headers=headers)
+    assert remove_response.status_code == 204, remove_response.text
+
+    account_response = client.get(f"/api/v1/governance/accounts/{account_a}", headers=headers)
+    assert account_response.status_code == 200, account_response.text
+    assert account_response.json()["ppt_template_status"] == "not_configured"
+
+
 def test_trimble_finance_ai_assistant_seed_data_exists() -> None:
     get_settings.cache_clear()
     Base.metadata.create_all(bind=engine)
+    ensure_schema_upgrades()
     seed()
 
     with SessionLocal() as db:

@@ -87,6 +87,9 @@ class AccountOut(ORMModel):
     health: Health
     delivery_head_id: str | None
     program_manager_id: str | None
+    ppt_template_id: str | None = None
+    ppt_template_filename: str | None = None
+    ppt_template_status: str = "not_configured"
 
 
 class ProjectCreate(BaseModel):
@@ -422,6 +425,9 @@ class ReportTemplateOut(ORMModel):
     name: str
     file_path: str
     file_type: str
+    filename: str | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
     account_id: str | None = None
     project_id: str | None = None
     uploaded_by_id: str | None

@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Building, Search, Globe, Shield, Coins, AlertCircle, Sparkles, Plus, X, Pencil } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { Account } from '../types';
-import { apiCreateAccount, apiListReportTemplates, apiUpdateAccount, apiUploadReportTemplate } from '../services/api';
+import { apiCreateAccount, apiDeleteAccountTemplate, apiUpdateAccount, apiUploadAccountTemplate } from '../services/api';
 
 export default function Accounts() {
   const { accounts, projects, setAccounts, authToken } = useStore();
@@ -13,7 +13,6 @@ export default function Accounts() {
   const [isAddingAccount, setIsAddingAccount] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [accountTemplateFile, setAccountTemplateFile] = useState<File | null>(null);
-  const [accountTemplateName, setAccountTemplateName] = useState('');
   const [accountTemplateStatus, setAccountTemplateStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [newAccountData, setNewAccountData] = useState({
@@ -23,12 +22,6 @@ export default function Accounts() {
     businessUnit: 'Banking',
     contractValue: '0'
   });
-
-  useEffect(() => {
-    if (!authToken) return;
-    apiListReportTemplates(authToken)
-      .catch(() => undefined);
-  }, [authToken]);
 
   // Compute aggregated stats
   const totalAccounts = accounts.length;
@@ -70,7 +63,6 @@ export default function Accounts() {
       contractValue: '0'
     });
     setAccountTemplateFile(null);
-    setAccountTemplateName('');
     setAccountTemplateStatus(null);
     setEditingAccountId(null);
     if (fileInputRef.current) {
@@ -111,6 +103,9 @@ export default function Accounts() {
             status: saved.status,
             health: saved.health,
             deliveryManagerId: saved.delivery_head_id || account.deliveryManagerId,
+            pptTemplateId: saved.ppt_template_id || account.pptTemplateId,
+            pptTemplateFilename: saved.ppt_template_filename || account.pptTemplateFilename,
+            pptTemplateStatus: saved.ppt_template_status || account.pptTemplateStatus,
           } : account)
         : [
             ...accounts,
@@ -125,16 +120,22 @@ export default function Accounts() {
               health: saved.health,
               studioId: '',
               deliveryManagerId: saved.delivery_head_id || '',
+              pptTemplateId: saved.ppt_template_id || null,
+              pptTemplateFilename: saved.ppt_template_filename || null,
+              pptTemplateStatus: saved.ppt_template_status || 'not_configured',
             }
           ];
-      setAccounts(nextAccounts);
 
       if (accountTemplateFile) {
-        const formData = new FormData();
-        formData.append('name', accountTemplateName || accountTemplateFile.name.replace(/\.[^/.]+$/, ''));
-        formData.append('account_id', saved.id);
-        formData.append('file', accountTemplateFile);
-        await apiUploadReportTemplate(formData, authToken);
+        const template = await apiUploadAccountTemplate(saved.id, accountTemplateFile, authToken);
+        setAccounts(nextAccounts.map((account) => account.id === saved.id ? {
+          ...account,
+          pptTemplateId: template.id,
+          pptTemplateFilename: template.filename,
+          pptTemplateStatus: 'configured',
+        } : account));
+      } else {
+        setAccounts(nextAccounts);
       }
 
       setIsAddingAccount(false);
@@ -160,6 +161,22 @@ export default function Accounts() {
     }
     setAccountTemplateStatus(null);
     setIsAddingAccount(true);
+  };
+
+  const removeAccountTemplate = async () => {
+    if (!authToken || !editingAccountId) return;
+    try {
+      await apiDeleteAccountTemplate(editingAccountId, authToken);
+      setAccounts(accounts.map((account) => account.id === editingAccountId ? {
+        ...account,
+        pptTemplateId: null,
+        pptTemplateFilename: null,
+        pptTemplateStatus: 'not_configured',
+      } : account));
+      setAccountTemplateStatus(null);
+    } catch (err) {
+      setAccountTemplateStatus(err instanceof Error ? err.message : 'Failed to remove template');
+    }
   };
 
   return (
@@ -313,6 +330,12 @@ export default function Accounts() {
                     <p className="font-semibold text-ink flex items-center gap-1"><Shield size={12} className="text-slate-400" /> Praveen Kumar Baburaya</p>
                   </div>
                 </div>
+                <div className="flex items-center justify-between rounded-lg border border-border bg-surface-alt/40 px-3 py-2 text-xs">
+                  <span className="font-semibold text-ink-soft">PPT template</span>
+                  <span className={acc.pptTemplateStatus === 'configured' ? 'text-success font-semibold' : 'text-ink-faint'}>
+                    {acc.pptTemplateStatus === 'configured' ? acc.pptTemplateFilename : 'Not configured'}
+                  </span>
+                </div>
 
                 {/* Projects Section */}
                 <div className="space-y-2 pt-2">
@@ -393,22 +416,13 @@ export default function Accounts() {
 
                 <div className="space-y-2 border border-border rounded-xl p-3 bg-surface-alt/40">
                   <label className="block text-xs font-semibold text-ink-soft uppercase tracking-wider">Account Template (PPTX/PDF)</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={accountTemplateName}
-                      onChange={(e) => setAccountTemplateName(e.target.value)}
-                      placeholder="Optional template label"
-                      className="flex-1 border border-border rounded-lg px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-3 py-2 border border-border rounded-lg text-xs font-semibold text-ink-soft hover:bg-surface transition-colors"
-                    >
-                      {accountTemplateFile ? 'Replace File' : 'Choose File'}
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3 py-2 border border-border rounded-lg text-xs font-semibold text-ink-soft hover:bg-surface transition-colors"
+                  >
+                    {accountTemplateFile ? 'Replace File' : 'Choose File'}
+                  </button>
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -416,14 +430,19 @@ export default function Accounts() {
                     onChange={(e) => {
                       const file = e.target.files?.[0] ?? null;
                       setAccountTemplateFile(file);
-                      if (file && !accountTemplateName.trim()) {
-                        setAccountTemplateName(file.name.replace(/\.[^/.]+$/, ''));
-                      }
                     }}
                     className="hidden"
                   />
                   {accountTemplateFile && (
                     <p className="text-[11px] text-ink-faint">Selected: {accountTemplateFile.name}</p>
+                  )}
+                  {!accountTemplateFile && editingAccountId && accounts.find((account) => account.id === editingAccountId)?.pptTemplateFilename && (
+                    <div className="flex items-center justify-between gap-3 text-[11px] text-ink-faint">
+                      <span>Current: {accounts.find((account) => account.id === editingAccountId)?.pptTemplateFilename}</span>
+                      <button type="button" onClick={removeAccountTemplate} className="font-semibold text-danger hover:underline">
+                        Remove template
+                      </button>
+                    </div>
                   )}
                 </div>
 

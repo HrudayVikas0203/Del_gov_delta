@@ -16,6 +16,9 @@ MYSQL_COLUMNS: dict[str, dict[str, str]] = {
         "error_message": "TEXT NULL",
     },
     "report_templates": {
+        "filename": "VARCHAR(255) NULL",
+        "content_type": "VARCHAR(120) NULL",
+        "size_bytes": "INTEGER NULL",
         "account_id": "VARCHAR(36) NULL",
         "project_id": "VARCHAR(36) NULL",
     },
@@ -34,6 +37,9 @@ SQLITE_COLUMNS: dict[str, dict[str, str]] = {
         "error_message": "TEXT NULL",
     },
     "report_templates": {
+        "filename": "VARCHAR(255) NULL",
+        "content_type": "VARCHAR(120) NULL",
+        "size_bytes": "INTEGER NULL",
         "account_id": "VARCHAR(36) NULL",
         "project_id": "VARCHAR(36) NULL",
     },
