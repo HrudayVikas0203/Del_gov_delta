@@ -269,16 +269,19 @@ def _template_values(report: GeneratedReport, projects: list[Project], statuses:
         "PROJECT_NAME": ", ".join(project.name for project in projects) or "All Projects",
         "REPORT_DATE": report.generated_at.strftime("%d %b %Y") if report.generated_at else "",
         "OVERALL_STATUS": overall_status,
+        "COMPLETION": f"{metrics['avg_completion']}%",
+        "HOURS": str(metrics["hours"]),
         "EXECUTIVE_SUMMARY": summary,
         "ACHIEVEMENTS": "\n".join(f"- {item}" for item in achievements[:8]) or "No achievements reported",
         "RISKS": "\n".join(f"- {item}" for item in risks[:8]) or "No risks reported",
         "BLOCKERS": "\n".join(f"- {item}" for item in blockers[:8]) or "No blockers reported",
         "NEXT_STEPS": "\n".join(f"- {item}" for item in next_steps[:8]) or "No next steps reported",
+        "NEXT_WEEK_PLAN": "\n".join(f"- {item}" for item in next_steps[:8]) or "No next steps reported",
         "PROJECT_METRICS": f"Projects: {metrics['project_count']} | Updates: {metrics['status_count']} | Completion: {metrics['avg_completion']}% | Blockers: {metrics['blocker_count']}",
     }
 
 
-def _populate_template(prs: Presentation, values: dict[str, str]) -> bool:
+def _populate_template(prs: Presentation, values: dict[str, str], mapping=None) -> bool:
     replaced = False
 
     def replace_text(text: str) -> str:
@@ -291,26 +294,58 @@ def _populate_template(prs: Presentation, values: dict[str, str]) -> bool:
                     replaced = True
         return updated
 
-    for slide in prs.slides:
-        for shape in slide.shapes:
+    def set_shape_text(shape, text: str) -> None:
+        nonlocal replaced
+        if text == getattr(shape, "text", ""):
+            return
+        if getattr(shape, "has_text_frame", False):
+            paragraphs = shape.text_frame.paragraphs
+            if len(paragraphs) == 1 and len(paragraphs[0].runs) == 1:
+                paragraphs[0].runs[0].text = text
+            else:
+                shape.text = text
+            replaced = True
+
+    def set_cell_text(cell, text: str) -> None:
+        nonlocal replaced
+        if text == cell.text:
+            return
+        paragraphs = cell.text_frame.paragraphs
+        if len(paragraphs) == 1 and len(paragraphs[0].runs) == 1:
+            paragraphs[0].runs[0].text = text
+        else:
+            cell.text = text
+        replaced = True
+
+    def mapped_text(fields: dict) -> str:
+        parts = []
+        for key, value in fields.items():
+            if value is None:
+                continue
+            source_value = values.get(key, value)
+            parts.append("\n".join(str(item) for item in source_value) if isinstance(source_value, list) else str(source_value))
+        return "\n".join(parts)
+
+    mapped_elements = {}
+    for slide_mapping in (mapping.slides if mapping else []):
+        for element_id, fields in slide_mapping.element_fields.items():
+            mapped_elements[element_id] = mapped_text(fields)
+
+    for slide_index, slide in enumerate(prs.slides):
+        for shape_index, shape in enumerate(slide.shapes):
+            element_id = f"slide_{slide_index}_shape_{shape_index}"
+            if element_id in mapped_elements:
+                set_shape_text(shape, mapped_elements[element_id])
             if getattr(shape, "has_text_frame", False):
                 updated = replace_text(shape.text)
                 if updated != shape.text:
-                    paragraphs = shape.text_frame.paragraphs
-                    if len(paragraphs) == 1 and len(paragraphs[0].runs) == 1:
-                        paragraphs[0].runs[0].text = updated
-                    else:
-                        shape.text = updated
+                    set_shape_text(shape, updated)
             if getattr(shape, "has_table", False):
                 for row in shape.table.rows:
                     for cell in row.cells:
                         updated = replace_text(cell.text)
                         if updated != cell.text:
-                            paragraphs = cell.text_frame.paragraphs
-                            if len(paragraphs) == 1 and len(paragraphs[0].runs) == 1:
-                                paragraphs[0].runs[0].text = updated
-                            else:
-                                cell.text = updated
+                            set_cell_text(cell, updated)
     return replaced
 
 
@@ -350,20 +385,18 @@ def _generate_ppt(path: Path, report: GeneratedReport, projects: list[Project], 
         _, mapping = map_template(base_template, db, projects, statuses)
         for slide in mapping.slides:
             for key, value in slide.fields.items():
+                if key in values:
+                    continue
                 if isinstance(value, list):
                     values[key] = "\n".join(str(item) for item in value)
                 elif value is not None:
                     values[key] = str(value)
-        if mapping.account_name:
-            values["ACCOUNT_NAME"] = mapping.account_name
-        if mapping.project_name:
-            values["PROJECT_NAME"] = mapping.project_name
         if mapping.slides:
             executive = next((slide.fields.get("EXECUTIVE_SUMMARY") for slide in mapping.slides if slide.fields.get("EXECUTIVE_SUMMARY")), None)
             if executive:
                 summary_text = str(executive)
                 values["EXECUTIVE_SUMMARY"] = summary_text
-    _populate_template(prs, values)
+    _populate_template(prs, values, mapping if llm and llm.provider == "gemini" and base_template else None)
 
     summary = prs.slides.add_slide(prs.slide_layouts[5] if len(prs.slide_layouts) > 5 else prs.slide_layouts[0])
     _set_slide_title(summary, "Executive Delivery Summary")

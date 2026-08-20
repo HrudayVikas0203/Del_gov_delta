@@ -15,6 +15,7 @@ from app.models.status import WeeklyStatus
 class SlideMapping(BaseModel):
     slide_index: int = Field(ge=0)
     fields: dict[str, str | list[str] | None] = Field(default_factory=dict)
+    element_fields: dict[str, dict[str, str | list[str] | None]] = Field(default_factory=dict)
 
 
 class PPTMapping(BaseModel):
@@ -38,13 +39,15 @@ def normalize_status_data(db: Session, projects: list[Project], statuses: list[W
 
 
 def mapping_prompt(template: TemplateStructure, status_data: dict) -> str:
-    return """You are a delivery governance report mapping engine. Return only JSON matching the supplied schema. Use only factual values in the status data. Do not invent, merge, or transform numerical values. Do not change the template design or slide count. Map semantic template tokens such as PROJECT_NAME, ACCOUNT_NAME, OVERALL_STATUS, EXECUTIVE_SUMMARY, ACHIEVEMENTS, BLOCKERS, RISKS, and NEXT_STEPS to factual values. If a value is absent, return null or an empty array.\n\nTEMPLATE STRUCTURE:\n""" + template.model_dump_json() + "\n\nSTATUS DATA:\n" + json.dumps(status_data, default=str)
+    return """You are a delivery governance report mapping engine. Return only JSON matching this schema: {\"account_name\": string|null, \"project_name\": string|null, \"reporting_period\": string|null, \"slides\": [{\"slide_index\": integer, \"fields\": {\"FIELD_NAME\": string|array|null}, \"element_fields\": {\"ELEMENT_ID\": {\"FIELD_NAME\": string|array|null}}}]}. Use only factual values in the status data. Do not invent, merge, or transform numerical values. Do not change the template design, slide count, dimensions, or element count. Map semantic template tokens and labels to these fields: ACCOUNT_NAME, PROJECT_NAME, OVERALL_STATUS, COMPLETION, HOURS, ACHIEVEMENTS, BLOCKERS, RISKS, NEXT_WEEK_PLAN, and EXECUTIVE_SUMMARY. For every mapped value, include the target element id in element_fields. Use the exact element ids from TEMPLATE STRUCTURE. A mapped element should receive one or more fields; the generator will preserve its existing formatting while replacing its text. If a value is absent, return null or an empty array.\n\nTEMPLATE STRUCTURE:\n""" + template.model_dump_json() + "\n\nSTATUS DATA:\n" + json.dumps(status_data, default=str)
 
 
 def map_with_gemini(template: TemplateStructure, status_data: dict) -> PPTMapping:
     settings = get_settings()
     if not settings.gemini_api_key:
         raise RuntimeError("Gemini API key is not configured for PPT mapping")
+    if settings.gemini_default_model not in {"gemini-2.5-flash", "gemini-3.5-flash"}:
+        raise RuntimeError("PPT mapping requires gemini-2.5-flash or gemini-3.5-flash")
     from google import genai
     from google.genai import types
 

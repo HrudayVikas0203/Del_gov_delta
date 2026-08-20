@@ -7,6 +7,7 @@ from pptx.util import Inches
 from app.ai.ppt_mapping import PPTMapping, map_with_gemini
 from app.ai.template_analysis import analyze_template
 from app.core.config import get_settings
+from app.reports.generator import _populate_template
 
 
 def _template(path: Path) -> None:
@@ -42,6 +43,48 @@ def test_gemini_mapping_validates_structured_response(monkeypatch, tmp_path):
     assert isinstance(mapping, PPTMapping)
     assert mapping.project_name == "Project A1"
     assert mapping.slides[0].fields["ACHIEVEMENTS"] == ["Completed work"]
+
+
+def test_shape_targeted_mapping_populates_all_status_fields(tmp_path):
+    path = tmp_path / "labelled-account-template.pptx"
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    fields = [
+        "ACCOUNT_NAME", "PROJECT_NAME", "OVERALL_STATUS", "COMPLETION",
+        "HOURS", "ACHIEVEMENTS", "BLOCKERS", "RISKS", "NEXT_WEEK_PLAN",
+    ]
+    for index, field in enumerate(fields):
+        box = slide.shapes.add_textbox(Inches(1), Inches(0.4 + index * 0.5), Inches(8), Inches(0.35))
+        box.text = field
+    prs.save(path)
+
+    structure = analyze_template(path)
+    element_fields = {
+        element.id: {fields[index]: fields[index]}
+        for index, element in enumerate(structure.slides[0].elements)
+    }
+    mapping = PPTMapping(slides=[{"slide_index": 0, "element_fields": element_fields}])
+    values = {
+        "ACCOUNT_NAME": "Arbitrary Account",
+        "PROJECT_NAME": "Arbitrary Project",
+        "OVERALL_STATUS": "Amber",
+        "COMPLETION": "73%",
+        "HOURS": "41",
+        "ACHIEVEMENTS": "Completed integration testing",
+        "BLOCKERS": "Waiting for upstream approval",
+        "RISKS": "Approval delay may affect release",
+        "NEXT_WEEK_PLAN": "Start user acceptance testing",
+    }
+
+    populated = Presentation(str(path))
+    assert _populate_template(populated, values, mapping)
+    output = tmp_path / "populated.pptx"
+    populated.save(output)
+
+    reopened = Presentation(str(output))
+    text = "\n".join(shape.text for slide in reopened.slides for shape in slide.shapes if getattr(shape, "text", ""))
+    for value in values.values():
+        assert value in text
 
 
 def test_gemini_mapping_requires_exact_model(monkeypatch):
