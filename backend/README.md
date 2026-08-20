@@ -30,6 +30,27 @@ python -m app.db.seed
 uvicorn app.main:app --reload --port 8000
 ```
 
+## Render Deployment
+
+Configure the Render web service with `backend` as its root directory:
+
+```text
+Build command: pip install -r requirements.txt
+Start command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+Health check: /health
+```
+
+Set `DATABASE_URL`, `SECRET_KEY`, `BACKEND_CORS_ORIGINS`, and `CORS_ORIGIN_REGEX` in Render. The production frontend should set `VITE_API_URL=https://del-gov-delta.onrender.com` (or use the repository Vercel rewrite). Keep `SMTP_USER` and `SMTP_PASSWORD` configured only on Render; never add them to frontend environment variables.
+
+Verify the deployment with:
+
+```bash
+curl https://del-gov-delta.onrender.com/health
+curl -i https://del-gov-delta.onrender.com/api/v1/tasks
+```
+
+The tasks request should return `401` without a bearer token, which confirms the real route is reachable. After signing in, use the returned bearer token for task and email API calls. Send-now email uses `POST /api/v1/emails` with `delivery: "send_now"`; scheduled email uses the same endpoint with `delivery: "schedule"` and a future `scheduled_at`, then the backend dispatcher processes it.
+
 Optional worker:
 
 ```powershell

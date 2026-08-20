@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: del-gov-delta-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: BACKEND_CORS_ORIGINS
+        value: https://del-gov-delta.vercel.app,https://del-gov-delta-k2zs.vercel.app,http://localhost:5173,http://127.0.0.1:5173
+      - key: CORS_ORIGIN_REGEX
+        value: https://.*\\.vercel\\.app
+      - key: SEED_DEMO_DATA
+        value: "false"
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
