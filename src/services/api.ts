@@ -1,6 +1,6 @@
 const RAW_API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV
   ? 'http://127.0.0.1:8000'
-  : 'https://del-gov-delta.onrender.com');
+  : window.location.origin);
 const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
 const API_PATH_PREFIX = '/api/v1';
 
