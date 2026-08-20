@@ -85,10 +85,13 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_default_model: str = "gpt-4.1-mini"
     groq_api_key: str | None = None
-    groq_default_model: str = "llama-3.3-70b-versatile"
+    groq_default_model: str = Field(
+        default="qwen/qwen3.6-27b",
+        validation_alias=AliasChoices("GROQ_DEFAULT_MODEL", "groq_default_model"),
+    )
     gemini_api_key: str | None = None
     gemini_default_model: str = Field(
-        default="gemini-2.5-flash",
+        default="gemini-3.5-flash",
         validation_alias=AliasChoices("GEMINI_MODEL", "gemini_default_model"),
     )
     anthropic_api_key: str | None = None
@@ -177,11 +180,6 @@ class Settings(BaseSettings):
             f"mysql+pymysql://{user}:{password}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}?charset=utf8mb4"
         )
-        return self
-
-    @model_validator(mode="after")
-    def enforce_gemini_model(self) -> "Settings":
-        self.gemini_default_model = "gemini-2.5-flash"
         return self
 
     def get_database_diagnostics(self) -> dict[str, object]:

@@ -22,7 +22,7 @@ def available_providers() -> list[LLMProvider]:
     settings = get_settings()
     return [
         LLMProvider("openai", "OpenAI", settings.openai_default_model, bool(settings.openai_api_key), [settings.openai_default_model, "gpt-4.1", "gpt-4o-mini"]),
-        LLMProvider("groq", "Groq", settings.groq_default_model, bool(settings.groq_api_key), [settings.groq_default_model, "llama-3.1-8b-instant"]),
+        LLMProvider("groq", "Groq", settings.groq_default_model, bool(settings.groq_api_key), [settings.groq_default_model, "openai/gpt-oss-120b", "openai/gpt-oss-20b"]),
         LLMProvider("gemini", "Gemini", settings.gemini_default_model, bool(settings.gemini_api_key), [settings.gemini_default_model]),
         LLMProvider("claude", "Claude", settings.claude_default_model, bool(settings.anthropic_api_key), [settings.claude_default_model, "claude-3-5-haiku-latest"]),
     ]

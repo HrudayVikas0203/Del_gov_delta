@@ -40,7 +40,7 @@ def main() -> None:
         try:
             from google import genai
             client = genai.Client(api_key=settings.gemini_api_key)
-            response = client.models.generate_content(model="gemini-2.5-flash", contents="Reply with exactly: OK")
+            response = client.models.generate_content(model=settings.gemini_default_model, contents="Reply with exactly: OK")
             print("Connection: SUCCESS")
             print(f"Response: {'VALID' if (response.text or '').strip() else 'INVALID'}")
         except Exception as exc:

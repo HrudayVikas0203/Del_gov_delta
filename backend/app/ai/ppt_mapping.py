@@ -45,15 +45,17 @@ def map_with_gemini(template: TemplateStructure, status_data: dict) -> PPTMappin
     settings = get_settings()
     if not settings.gemini_api_key:
         raise RuntimeError("Gemini API key is not configured for PPT mapping")
-    if settings.gemini_default_model != "gemini-2.5-flash":
-        raise RuntimeError("Gemini PPT mapping requires model gemini-2.5-flash")
     from google import genai
     from google.genai import types
 
     client = genai.Client(api_key=settings.gemini_api_key)
     for attempt in range(2):
         try:
-            response = client.models.generate_content(model="gemini-2.5-flash", contents=mapping_prompt(template, status_data), config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=PPTMapping))
+            response = client.models.generate_content(
+                model=settings.gemini_default_model,
+                contents=mapping_prompt(template, status_data),
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
+            )
             return PPTMapping.model_validate_json(response.text or "")
         except (ValidationError, ValueError, json.JSONDecodeError) as exc:
             if attempt == 1:
