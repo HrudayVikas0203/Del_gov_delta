@@ -1,4 +1,3 @@
-import hashlib
 import os
 
 from sqlalchemy.engine import make_url
@@ -80,7 +79,7 @@ def test_database_url_explicit_render_override(monkeypatch):
     assert diagnostics["Password length"] == len("RenderPassword!2024")
 
 
-def test_database_url_debug_logs_password_fingerprint(monkeypatch, capsys):
+def test_database_url_debug_does_not_log_credentials(monkeypatch, capsys):
     fake_password = "fake-password-123"
     monkeypatch.setenv("DB_DEBUG", "true")
     monkeypatch.setenv("ENVIRONMENT", "production")
@@ -99,9 +98,7 @@ def test_database_url_debug_logs_password_fingerprint(monkeypatch, capsys):
     assert parsed.password == fake_password
 
     output = capsys.readouterr().out
-    expected_hash = hashlib.sha256(fake_password.encode("utf-8")).hexdigest()
-    assert f"DATABASE_PASSWORD_SHA256={expected_hash}" in output
-    assert f"DATABASE_PASSWORD_LENGTH={len(fake_password)}" in output
+    assert output == ""
     assert fake_password not in output
     assert "DATABASE_URL=" not in output
     assert "mysql+pymysql://avnadmin:" not in output
