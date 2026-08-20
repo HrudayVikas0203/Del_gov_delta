@@ -195,25 +195,29 @@ export default function TaskTracker() {
   const handleCreate = async (event: FormEvent) => {
     event.preventDefault();
     if (!authToken || !form.projectId) return;
-    const labels = form.labels.split(',').map((label) => label.trim()).filter(Boolean);
-    const created = await apiCreateTask({
-      project_id: form.projectId,
-      title: form.title,
-      description: form.description,
-      assignee_id: form.assigneeId || null,
-      assignee_ids: [form.assigneeId, ...form.extraAssigneeIds].filter(Boolean),
-      priority: form.priority,
-      status: form.status,
-      due_date: form.dueDate || null,
-      estimate_hours: Number(form.estimateHours) || 0,
-      labels,
-      tags: labels,
-      checklist: [],
-    }, authToken);
-    setTasks((current) => [created, ...current]);
-    setForm((current) => ({ ...current, title: '', description: '', assigneeId: '', extraAssigneeIds: [], priority: 'medium', status: 'todo', dueDate: '', estimateHours: 8, labels: 'Task' }));
-    setIsFormOpen(false);
-    setFeedback('Task created.');
+    try {
+      const labels = form.labels.split(',').map((label) => label.trim()).filter(Boolean);
+      const created = await apiCreateTask({
+        project_id: form.projectId,
+        title: form.title,
+        description: form.description,
+        assignee_id: form.assigneeId || null,
+        assignee_ids: [form.assigneeId, ...form.extraAssigneeIds].filter(Boolean),
+        priority: form.priority,
+        status: form.status,
+        due_date: form.dueDate || null,
+        estimate_hours: Number(form.estimateHours) || 0,
+        labels,
+        tags: labels,
+        checklist: [],
+      }, authToken);
+      setTasks((current) => [created, ...current]);
+      setForm((current) => ({ ...current, title: '', description: '', assigneeId: '', extraAssigneeIds: [], priority: 'medium', status: 'todo', dueDate: '', estimateHours: 8, labels: 'Task' }));
+      setIsFormOpen(false);
+      setFeedback('Task created.');
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Unable to create task. Check the project and assignee selections.');
+    }
   };
 
   const handleStatusChange = async (task: DeliveryTask, nextStatus: TaskStatus) => {

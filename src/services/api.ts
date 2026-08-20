@@ -1,6 +1,7 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV
+const RAW_API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV
   ? 'http://127.0.0.1:8000'
   : 'https://del-gov-delta.onrender.com');
+const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
 const API_PATH_PREFIX = '/api/v1';
 
 function buildUrl(path: string) {
@@ -42,7 +43,12 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
     headers,
   };
 
-  const response = await fetch(url, requestOptions);
+  let response: Response;
+  try {
+    response = await fetch(url, requestOptions);
+  } catch (error) {
+    throw new Error(`Unable to reach the backend at ${API_BASE_URL}. Check the API deployment or VITE_API_URL and try again.`);
+  }
   const contentType = response.headers.get('content-type') || '';
 
   if (!response.ok) {
