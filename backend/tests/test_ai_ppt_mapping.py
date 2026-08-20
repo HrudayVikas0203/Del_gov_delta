@@ -105,6 +105,24 @@ def test_gemini_response_without_text_parts_is_rejected():
         raise AssertionError("Expected missing text parts to be rejected")
 
 
+def test_gemini_mapping_without_text_parts_is_actionable(monkeypatch, tmp_path):
+    path = tmp_path / "account-template.pptx"
+    _template(path)
+
+    class FakeModels:
+        def generate_content(self, **_kwargs):
+            return SimpleNamespace(candidates=[SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(thought_signature="ignored")]))])
+
+    monkeypatch.setattr("google.genai.Client", lambda **_kwargs: SimpleNamespace(models=FakeModels()))
+    monkeypatch.setattr("app.ai.ppt_mapping.get_settings", lambda: SimpleNamespace(gemini_api_key="configured", gemini_default_model="gemini-3.5-flash"))
+    try:
+        map_with_gemini(analyze_template(path), {})
+    except RuntimeError as exc:
+        assert "no usable text content for PPT mapping" in str(exc)
+    else:
+        raise AssertionError("Expected missing Gemini text to fail clearly")
+
+
 def test_shape_targeted_mapping_populates_all_status_fields(tmp_path):
     path = tmp_path / "labelled-account-template.pptx"
     prs = Presentation()

@@ -63,6 +63,8 @@ def map_with_gemini(template: TemplateStructure, status_data: dict) -> PPTMappin
             return PPTMapping.model_validate(parse_gemini_json(response))
         except (GeminiResponseError, ValidationError, ValueError, json.JSONDecodeError) as exc:
             if attempt == 1:
+                if isinstance(exc, GeminiResponseError) and "no text parts" in str(exc):
+                    raise RuntimeError("Gemini returned no usable text content for PPT mapping") from exc
                 raise RuntimeError(f"Gemini returned invalid PPT mapping JSON: {exc}") from exc
     raise RuntimeError("Gemini PPT mapping failed")
 

@@ -2,6 +2,7 @@
 import logging
 from pathlib import Path
 
+from app.ai.gemini_response import extract_gemini_text
 from app.ai.template_analysis import analyze_template
 from app.core.config import get_settings
 
@@ -42,7 +43,7 @@ def main() -> None:
             client = genai.Client(api_key=settings.gemini_api_key)
             response = client.models.generate_content(model=settings.gemini_default_model, contents="Reply with exactly: OK")
             print("Connection: SUCCESS")
-            print(f"Response: {'VALID' if (response.text or '').strip() else 'INVALID'}")
+            print(f"Response: {'VALID' if extract_gemini_text(response) else 'INVALID'}")
         except Exception as exc:
             print("Connection: FAILED")
             print(f"Error: {_failure(exc)}")
