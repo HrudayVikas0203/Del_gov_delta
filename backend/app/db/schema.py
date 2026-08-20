@@ -19,6 +19,9 @@ MYSQL_COLUMNS: dict[str, dict[str, str]] = {
         "account_id": "VARCHAR(36) NULL",
         "project_id": "VARCHAR(36) NULL",
     },
+    "scheduled_emails": {
+        "html_body": "TEXT NULL",
+    },
 }
 
 SQLITE_COLUMNS: dict[str, dict[str, str]] = {
@@ -36,6 +39,9 @@ SQLITE_COLUMNS: dict[str, dict[str, str]] = {
     "report_templates": {
         "account_id": "VARCHAR(36) NULL",
         "project_id": "VARCHAR(36) NULL",
+    },
+    "scheduled_emails": {
+        "html_body": "TEXT NULL",
     },
 }
 

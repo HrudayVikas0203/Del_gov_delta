@@ -100,3 +100,53 @@ def cancel_email(email_id: str, db: Session = Depends(get_db), actor: Employee =
     audit(db, actor.id, "Email Cancelled", "Email Scheduling", email.subject)
     db.commit()
     return None
+
+
+@router.get("/{email_id}", response_model=ScheduledEmailOut)
+def get_email(email_id: str, db: Session = Depends(get_db), actor: Employee = Depends(require_min_role(Role.TEAM_LEAD))):
+    email = db.get(ScheduledEmail, email_id)
+    if not email:
+        raise HTTPException(status_code=404, detail="Scheduled email not found")
+    if email.sender_id != actor.id and actor.role not in {Role.DELIVERY_HEAD, Role.PROGRAM_MANAGER}:
+        raise HTTPException(status_code=403, detail="Not authorized to view this email")
+    return email
+
+
+@router.put("/{email_id}", response_model=ScheduledEmailOut)
+def update_email(email_id: str, payload: ScheduledEmailUpdate, db: Session = Depends(get_db), actor: Employee = Depends(require_min_role(Role.TEAM_LEAD))):
+    email = db.get(ScheduledEmail, email_id)
+    if not email:
+        raise HTTPException(status_code=404, detail="Scheduled email not found")
+    if email.sender_id != actor.id and actor.role not in {Role.DELIVERY_HEAD, Role.PROGRAM_MANAGER}:
+        raise HTTPException(status_code=403, detail="Not authorized to edit this email")
+    if email.status != EmailStatus.SCHEDULED:
+        raise HTTPException(status_code=400, detail="Only scheduled emails can be edited")
+    if payload.recipients is not None:
+        email.recipients = [str(recipient) for recipient in payload.recipients]
+    if payload.subject is not None:
+        email.subject = payload.subject
+    if payload.body is not None:
+        email.body = payload.body
+    if payload.scheduled_at is not None:
+        email.scheduled_at = payload.scheduled_at
+    if email.scheduled_at and email.scheduled_at.tzinfo is None:
+        email.scheduled_at = email.scheduled_at.replace(tzinfo=timezone.utc)
+    if not email.scheduled_at or email.scheduled_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Choose a future schedule time")
+    db.commit()
+    db.refresh(email)
+    return email
+
+
+@router.post("/{email_id}/retry", response_model=ScheduledEmailOut)
+def retry_email(email_id: str, db: Session = Depends(get_db), actor: Employee = Depends(require_min_role(Role.TEAM_LEAD))):
+    email = db.get(ScheduledEmail, email_id)
+    if not email:
+        raise HTTPException(status_code=404, detail="Scheduled email not found")
+    if email.sender_id != actor.id and actor.role not in {Role.DELIVERY_HEAD, Role.PROGRAM_MANAGER}:
+        raise HTTPException(status_code=403, detail="Not authorized to retry this email")
+    if email.status != EmailStatus.FAILED:
+        raise HTTPException(status_code=400, detail="Only failed emails can be retried")
+    email.status = EmailStatus.PENDING
+    db.commit()
+    return send_email_record(db, email)

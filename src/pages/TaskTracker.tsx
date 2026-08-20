@@ -23,13 +23,16 @@ import {
 import { useStore } from '../store/useStore';
 import {
   apiAddTaskComment,
+  apiCancelScheduledEmail,
   apiCreateTask,
   apiDeleteTask,
   apiEmailConfig,
+  apiEmailTemplates,
   apiListScheduledEmails,
   apiListTaskComments,
   apiListTasks,
   apiScheduleEmail,
+  apiRetryScheduledEmail,
   apiSubmitTaskForReview,
   apiTaskApproval,
   apiUpdateTaskStatus,
@@ -97,6 +100,9 @@ export default function TaskTracker() {
   });
   const [scheduledEmails, setScheduledEmails] = useState<any[]>([]);
   const [smtpConfigured, setSmtpConfigured] = useState(false);
+  const [emailTemplates, setEmailTemplates] = useState<Array<{ id: string; label: string; subject: string }>>([]);
+  const [emailTemplate, setEmailTemplate] = useState('custom');
+  const [emailTaskId, setEmailTaskId] = useState('');
   const [emailSubject, setEmailSubject] = useState('Weekly project task update');
   const [emailRecipients, setEmailRecipients] = useState('');
   const [emailBody, setEmailBody] = useState('Please review the current project tasks, blockers, and review items before the governance sync.');
@@ -118,9 +124,10 @@ export default function TaskTracker() {
   useEffect(() => {
     async function loadEmailState() {
       if (!authToken || !canManage) return;
-      const [config, emails] = await Promise.all([apiEmailConfig(authToken), apiListScheduledEmails(authToken)]);
+      const [config, emails, templates] = await Promise.all([apiEmailConfig(authToken), apiListScheduledEmails(authToken), apiEmailTemplates(authToken)]);
       setSmtpConfigured(config.smtp_configured);
       setScheduledEmails(emails);
+      setEmailTemplates(templates);
     }
     loadEmailState().catch(() => undefined);
   }, [authToken, canManage]);
@@ -255,18 +262,40 @@ export default function TaskTracker() {
     event.preventDefault();
     if (!authToken) return;
     const recipients = emailRecipients.split(',').map((item) => item.trim()).filter(Boolean);
+    const selectedEmailTask = tasks.find((task) => task.id === emailTaskId);
     const scheduled = await apiScheduleEmail({
       recipients,
-      subject: emailSubject,
-      body: emailBody,
-      email_type: 'project_update',
+      subject: emailSubject || null,
+      body: emailBody || null,
+      email_type: emailTemplate,
       delivery: emailDateTime ? 'schedule' : 'send_now',
       project_id: selectedProjectId || null,
-      task_id: selectedTask?.id || null,
+      task_id: selectedEmailTask?.id || null,
       scheduled_at: emailDateTime ? new Date(emailDateTime).toISOString() : null,
     }, authToken);
     setScheduledEmails((current) => [scheduled, ...current]);
     setFeedback(emailDateTime ? 'Email scheduled.' : 'Email send attempted. Check status below.');
+  };
+
+  const updateEmailDraft = (templateId: string, taskId: string) => {
+    const task = tasks.find((item) => item.id === taskId);
+    const template = emailTemplates.find((item) => item.id === templateId);
+    setEmailTemplate(templateId);
+    setEmailTaskId(taskId);
+    if (template && template.subject) setEmailSubject(template.subject);
+    if (task && templateId !== 'custom') setEmailBody(`${task.title}\n\n${task.description || 'No description provided.'}\n\nDeadline: ${task.due_date || 'Not set'}\nPriority: ${task.priority}\nAssigned person: ${task.assignee_name || 'Unassigned'}`);
+  };
+
+  const handleCancelEmail = async (emailId: string) => {
+    if (!authToken) return;
+    await apiCancelScheduledEmail(emailId, authToken);
+    setScheduledEmails((current) => current.map((email) => email.id === emailId ? { ...email, status: 'cancelled' } : email));
+  };
+
+  const handleRetryEmail = async (emailId: string) => {
+    if (!authToken) return;
+    const retried = await apiRetryScheduledEmail(emailId, authToken);
+    setScheduledEmails((current) => current.map((email) => email.id === emailId ? retried : email));
   };
 
   const clearFilters = () => {
@@ -613,21 +642,32 @@ export default function TaskTracker() {
             <h2 className="text-sm font-bold text-ink flex items-center gap-2"><Mail size={16} className="text-blue-600" /> Email Scheduling</h2>
             <p className="text-xs text-ink-soft mt-1">SMTP is {smtpConfigured ? 'configured' : 'not configured yet'}. Emails are stored in the backend and dispatched by the scheduler.</p>
           </div>
-          <form onSubmit={handleScheduleEmail} className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_180px_auto] gap-3">
-            <input value={emailRecipients} onChange={(event) => setEmailRecipients(event.target.value)} required placeholder="recipient1@example.com, recipient2@example.com" className="rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-blue-600" />
+          <form onSubmit={handleScheduleEmail} className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <select value={emailTemplate} onChange={(event) => updateEmailDraft(event.target.value, emailTaskId)} className="rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-blue-600">
+              {emailTemplates.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}
+            </select>
+            <select value={emailTaskId} onChange={(event) => updateEmailDraft(emailTemplate, event.target.value)} className="rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-blue-600">
+              <option value="">Select a task (optional for custom email)</option>
+              {tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
+            </select>
+            <input value={emailRecipients} onChange={(event) => setEmailRecipients(event.target.value)} required placeholder="Recipient emails, separated by commas" className="lg:col-span-2 rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-blue-600" />
             <input value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} required placeholder="Subject" className="rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-blue-600" />
             <input type="datetime-local" value={emailDateTime} onChange={(event) => setEmailDateTime(event.target.value)} className="rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-blue-600" />
-            <button className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">{emailDateTime ? 'Schedule' : 'Send Now'}</button>
-            <textarea value={emailBody} onChange={(event) => setEmailBody(event.target.value)} rows={3} className="lg:col-span-4 rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-blue-600 resize-none" />
+            <textarea value={emailBody} onChange={(event) => setEmailBody(event.target.value)} required rows={5} placeholder="Email body preview" className="lg:col-span-2 rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm outline-none focus:border-blue-600 resize-none" />
+            <div className="lg:col-span-2 flex flex-wrap justify-end gap-2">
+              {!emailDateTime && <button type="submit" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Send Now</button>}
+              {emailDateTime && <button type="submit" className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Schedule Email</button>}
+            </div>
           </form>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full min-w-[760px] text-left text-xs">
+              <thead className="bg-surface-alt text-ink-faint"><tr><th className="p-3">Template</th><th className="p-3">Recipient(s)</th><th className="p-3">Subject</th><th className="p-3">Scheduled</th><th className="p-3">Status</th><th className="p-3">Actions</th></tr></thead>
+              <tbody>
             {scheduledEmails.map((email) => (
-              <div key={email.id} className="rounded-lg border border-border bg-surface-alt p-3">
-                <p className="text-xs font-bold text-ink truncate">{email.subject}</p>
-                <p className="mt-1 text-[11px] text-ink-faint">{email.status} / {email.scheduled_at ? new Date(email.scheduled_at).toLocaleString() : 'send now'}</p>
-                {email.error_message && <p className="mt-2 text-[11px] text-danger line-clamp-2">{email.error_message}</p>}
-              </div>
+              <tr key={email.id} className="border-t border-border"><td className="p-3">{email.email_type}</td><td className="p-3">{email.recipients.join(', ')}</td><td className="p-3 font-semibold">{email.subject}</td><td className="p-3">{email.scheduled_at ? new Date(email.scheduled_at).toLocaleString() : 'Immediate'}</td><td className="p-3">{email.status}{email.error_message && <span className="block text-danger">{email.error_message}</span>}</td><td className="p-3"><div className="flex gap-2">{email.status === 'scheduled' && <button type="button" onClick={() => handleCancelEmail(email.id)} className="text-danger hover:underline">Cancel</button>}{email.status === 'failed' && <button type="button" onClick={() => handleRetryEmail(email.id)} className="text-blue-600 hover:underline">Retry</button>}</div></td></tr>
             ))}
+              </tbody>
+            </table>
           </div>
         </section>
       )}

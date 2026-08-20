@@ -280,3 +280,15 @@ export async function apiScheduleEmail(payload: unknown, token: string) {
 export async function apiEmailConfig(token: string) {
   return request<{ smtp_configured: boolean }>('/emails/config', { method: 'GET' }, token);
 }
+
+export async function apiEmailTemplates(token: string) {
+  return request<Array<{ id: string; label: string; subject: string }>>('/emails/templates', { method: 'GET' }, token);
+}
+
+export async function apiCancelScheduledEmail(emailId: string, token: string) {
+  return request<void>(`/emails/${emailId}`, { method: 'DELETE' }, token);
+}
+
+export async function apiRetryScheduledEmail(emailId: string, token: string) {
+  return request<any>(`/emails/${emailId}/retry`, { method: 'POST' }, token);
+}
