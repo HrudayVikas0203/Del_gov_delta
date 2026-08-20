@@ -14,7 +14,7 @@ pymysql
 cryptography
 chromadb
 openai
-google-generativeai
+google-genai
 groq
 anthropic
 pypdf

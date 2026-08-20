@@ -232,7 +232,13 @@ export default function Reports() {
       project_id: (reportScopeMode === 'project' || reportScopeMode === 'individual') ? selectedProjectId : undefined,
       employee_id: reportScopeMode === 'individual' ? selectedEmployeeId : undefined,
       status_frequency: statusFrequency === 'all' ? undefined : statusFrequency,
-      llm: currentProvider?.configured ? { provider: selectedProviderName, model: selectedProviderModel } : undefined,
+      llm: (() => {
+        const pptProvider = template.format === 'PPT'
+          ? providers.find((provider) => provider.name === 'gemini' && provider.configured)
+          : undefined;
+        const provider = pptProvider ?? currentProvider;
+        return provider?.configured ? { provider: provider.name, model: provider.default_model } : undefined;
+      })(),
       use_celery: false,
     };
 

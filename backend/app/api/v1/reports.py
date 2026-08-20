@@ -119,6 +119,8 @@ def create_report(payload: ReportCreate, db: Session = Depends(get_db), actor: E
         scope=scope,
         template_id=template.id if template else None,
         generated_by_id=actor.id,
+        llm_provider=payload.llm.provider if payload.llm else None,
+        llm_model=payload.llm.model if payload.llm else None,
     )
     db.add(report)
     audit(db, actor.id, "Report Requested", "Reports", f"{report.title} requested in {report.report_format.value}")
@@ -134,7 +136,7 @@ def create_report(payload: ReportCreate, db: Session = Depends(get_db), actor: E
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Report generation failed: {exc}",
+                detail="Report generation failed. Check the configured AI provider and server diagnostics.",
             ) from exc
         db.refresh(report)
     return report

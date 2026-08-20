@@ -23,7 +23,7 @@ def available_providers() -> list[LLMProvider]:
     return [
         LLMProvider("openai", "OpenAI", settings.openai_default_model, bool(settings.openai_api_key), [settings.openai_default_model, "gpt-4.1", "gpt-4o-mini"]),
         LLMProvider("groq", "Groq", settings.groq_default_model, bool(settings.groq_api_key), [settings.groq_default_model, "llama-3.1-8b-instant"]),
-        LLMProvider("gemini", "Gemini", settings.gemini_default_model, bool(settings.gemini_api_key), [settings.gemini_default_model, "gemini-1.5-flash"]),
+        LLMProvider("gemini", "Gemini", settings.gemini_default_model, bool(settings.gemini_api_key), [settings.gemini_default_model]),
         LLMProvider("claude", "Claude", settings.claude_default_model, bool(settings.anthropic_api_key), [settings.claude_default_model, "claude-3-5-haiku-latest"]),
     ]
 
@@ -70,10 +70,10 @@ def generate_text(provider_name: str, prompt: str, model: str | None = None) -> 
             response = client.chat.completions.create(model=model_name, messages=_messages(prompt), temperature=0.2, max_tokens=1200)
             return response.choices[0].message.content or "", model_name
         if provider.name == "gemini":
-            import google.generativeai as genai
+            from google import genai
 
-            genai.configure(api_key=settings.gemini_api_key)
-            response = genai.GenerativeModel(model_name).generate_content(prompt)
+            client = genai.Client(api_key=settings.gemini_api_key)
+            response = client.models.generate_content(model=model_name, contents=prompt)
             return response.text or "", model_name
         if provider.name == "claude":
             from anthropic import Anthropic

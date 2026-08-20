@@ -25,6 +25,10 @@ MYSQL_COLUMNS: dict[str, dict[str, str]] = {
     "scheduled_emails": {
         "html_body": "TEXT NULL",
     },
+    "generated_reports": {
+        "llm_provider": "VARCHAR(40) NULL",
+        "llm_model": "VARCHAR(120) NULL",
+    },
 }
 
 SQLITE_COLUMNS: dict[str, dict[str, str]] = {
@@ -48,6 +52,10 @@ SQLITE_COLUMNS: dict[str, dict[str, str]] = {
     },
     "scheduled_emails": {
         "html_body": "TEXT NULL",
+    },
+    "generated_reports": {
+        "llm_provider": "VARCHAR(40) NULL",
+        "llm_model": "VARCHAR(120) NULL",
     },
 }
 

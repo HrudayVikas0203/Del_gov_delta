@@ -450,6 +450,8 @@ class ReportOut(ORMModel):
     template_id: str | None
     file_path: str | None
     status: str
+    llm_provider: str | None = None
+    llm_model: str | None = None
     generated_at: datetime
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)

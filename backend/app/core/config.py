@@ -87,7 +87,10 @@ class Settings(BaseSettings):
     groq_api_key: str | None = None
     groq_default_model: str = "llama-3.3-70b-versatile"
     gemini_api_key: str | None = None
-    gemini_default_model: str = "gemini-1.5-pro"
+    gemini_default_model: str = Field(
+        default="gemini-2.5-flash",
+        validation_alias=AliasChoices("GEMINI_MODEL", "gemini_default_model"),
+    )
     anthropic_api_key: str | None = None
     claude_default_model: str = "claude-3-5-sonnet-latest"
 
@@ -174,6 +177,11 @@ class Settings(BaseSettings):
             f"mysql+pymysql://{user}:{password}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}?charset=utf8mb4"
         )
+        return self
+
+    @model_validator(mode="after")
+    def enforce_gemini_model(self) -> "Settings":
+        self.gemini_default_model = "gemini-2.5-flash"
         return self
 
     def get_database_diagnostics(self) -> dict[str, object]:

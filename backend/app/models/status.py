@@ -75,6 +75,8 @@ class GeneratedReport(Base):
     file_path: Mapped[str | None] = mapped_column(String(500))
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="generating")
     generated_by_id: Mapped[str | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"))
+    llm_provider: Mapped[str | None] = mapped_column(String(40))
+    llm_model: Mapped[str | None] = mapped_column(String(120))
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     template = relationship("ReportTemplate", lazy="joined")

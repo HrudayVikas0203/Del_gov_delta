@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
+from app.ai.ppt_mapping import map_template
 from app.models.delivery import Account, Project
 from app.models.people import Employee
 from app.models.status import GeneratedReport, ReportFormat, WeeklyStatus
@@ -295,13 +296,21 @@ def _populate_template(prs: Presentation, values: dict[str, str]) -> bool:
             if getattr(shape, "has_text_frame", False):
                 updated = replace_text(shape.text)
                 if updated != shape.text:
-                    shape.text = updated
+                    paragraphs = shape.text_frame.paragraphs
+                    if len(paragraphs) == 1 and len(paragraphs[0].runs) == 1:
+                        paragraphs[0].runs[0].text = updated
+                    else:
+                        shape.text = updated
             if getattr(shape, "has_table", False):
                 for row in shape.table.rows:
                     for cell in row.cells:
                         updated = replace_text(cell.text)
                         if updated != cell.text:
-                            cell.text = updated
+                            paragraphs = cell.text_frame.paragraphs
+                            if len(paragraphs) == 1 and len(paragraphs[0].runs) == 1:
+                                paragraphs[0].runs[0].text = updated
+                            else:
+                                cell.text = updated
     return replaced
 
 
@@ -336,7 +345,25 @@ def _generate_ppt(path: Path, report: GeneratedReport, projects: list[Project], 
 
     metrics = _metrics(statuses, projects)
     summary_text = _llm_summary(report, projects, statuses, llm)
-    _populate_template(prs, _template_values(report, projects, statuses, db, summary_text))
+    values = _template_values(report, projects, statuses, db, summary_text)
+    if llm and llm.provider == "gemini" and base_template:
+        _, mapping = map_template(base_template, db, projects, statuses)
+        for slide in mapping.slides:
+            for key, value in slide.fields.items():
+                if isinstance(value, list):
+                    values[key] = "\n".join(str(item) for item in value)
+                elif value is not None:
+                    values[key] = str(value)
+        if mapping.account_name:
+            values["ACCOUNT_NAME"] = mapping.account_name
+        if mapping.project_name:
+            values["PROJECT_NAME"] = mapping.project_name
+        if mapping.slides:
+            executive = next((slide.fields.get("EXECUTIVE_SUMMARY") for slide in mapping.slides if slide.fields.get("EXECUTIVE_SUMMARY")), None)
+            if executive:
+                summary_text = str(executive)
+                values["EXECUTIVE_SUMMARY"] = summary_text
+    _populate_template(prs, values)
 
     summary = prs.slides.add_slide(prs.slide_layouts[5] if len(prs.slide_layouts) > 5 else prs.slide_layouts[0])
     _set_slide_title(summary, "Executive Delivery Summary")
