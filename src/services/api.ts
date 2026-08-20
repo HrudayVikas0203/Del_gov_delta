@@ -22,6 +22,24 @@ function buildHeaders(token?: string, contentType?: string) {
   return headers;
 }
 
+async function fetchWithRetry(url: string, options: RequestInit, attempts = 3): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      lastError = error;
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw error;
+      }
+      if (attempt < attempts - 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const url = buildUrl(path);
   const headers: HeadersInit = {
@@ -45,7 +63,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
   let response: Response;
   try {
-    response = await fetch(url, requestOptions);
+    response = await fetchWithRetry(url, requestOptions);
   } catch (error) {
     throw new Error(`Unable to reach the backend at ${API_BASE_URL}. Check the API deployment or VITE_API_URL and try again.`);
   }
@@ -70,7 +88,7 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
 async function requestBlob(path: string, token?: string): Promise<Blob> {
   const url = buildUrl(path);
-  const response = await fetch(url, { method: 'GET', headers: buildHeaders(token) });
+  const response = await fetchWithRetry(url, { method: 'GET', headers: buildHeaders(token) });
   if (!response.ok) {
     const contentType = response.headers.get('content-type') || '';
     const errorContent = contentType.includes('application/json') ? await response.json() : await response.text();

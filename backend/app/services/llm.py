@@ -4,6 +4,7 @@ import logging
 import httpx
 from fastapi import HTTPException, status
 
+from app.ai.gemini_response import extract_gemini_text
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ def generate_text(provider_name: str, prompt: str, model: str | None = None) -> 
 
             client = genai.Client(api_key=settings.gemini_api_key)
             response = client.models.generate_content(model=model_name, contents=prompt)
-            return response.text or "", model_name
+            return extract_gemini_text(response), model_name
         if provider.name == "claude":
             from anthropic import Anthropic
 

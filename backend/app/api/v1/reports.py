@@ -1,4 +1,5 @@
 ﻿from pathlib import Path
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -16,6 +17,7 @@ from app.services.audit import audit
 from app.workers.tasks import generate_report_task
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+logger = logging.getLogger(__name__)
 
 
 def _match_report_template(db: Session, payload: ReportCreate) -> ReportTemplate | None:
@@ -132,6 +134,7 @@ def create_report(payload: ReportCreate, db: Session = Depends(get_db), actor: E
         try:
             generate_report_file(db, report.id, payload.llm)
         except Exception as exc:
+            logger.exception("Report generation failed for report %s", report.id)
             report.status = "failed"
             db.commit()
             raise HTTPException(

@@ -5,6 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
+from app.ai.gemini_response import GeminiResponseError, parse_gemini_json
 from app.ai.template_analysis import TemplateStructure, analyze_template
 from app.core.config import get_settings
 from app.models.delivery import Account, Project
@@ -59,10 +60,10 @@ def map_with_gemini(template: TemplateStructure, status_data: dict) -> PPTMappin
                 contents=mapping_prompt(template, status_data),
                 config=types.GenerateContentConfig(response_mime_type="application/json"),
             )
-            return PPTMapping.model_validate_json(response.text or "")
-        except (ValidationError, ValueError, json.JSONDecodeError) as exc:
+            return PPTMapping.model_validate(parse_gemini_json(response))
+        except (GeminiResponseError, ValidationError, ValueError, json.JSONDecodeError) as exc:
             if attempt == 1:
-                raise RuntimeError("Gemini returned invalid PPT mapping JSON") from exc
+                raise RuntimeError(f"Gemini returned invalid PPT mapping JSON: {exc}") from exc
     raise RuntimeError("Gemini PPT mapping failed")
 
 
