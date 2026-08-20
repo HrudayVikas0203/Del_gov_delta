@@ -1,4 +1,5 @@
-﻿from pathlib import Path
+﻿import json
+from pathlib import Path
 from textwrap import shorten
 
 from openpyxl import Workbook
@@ -12,6 +13,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.models.delivery import Account, Project
@@ -28,6 +30,14 @@ WARNING = "#D97706"
 DANGER = "#DC2626"
 LIGHT_BLUE = "#EFF6FF"
 BORDER_BLUE = "#BFDBFE"
+
+
+class ReportNarrative(BaseModel):
+    executive_summary: str = Field(min_length=1)
+    achievements: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
 
 
 def _report_path(report: GeneratedReport) -> Path:
@@ -207,6 +217,7 @@ def _llm_summary(report: GeneratedReport, projects: list[Project], statuses: lis
     )
     metrics = _metrics(statuses, projects)
     prompt = (
+        "Return only valid JSON matching this schema: {\"executive_summary\": string, \"achievements\": [string], \"risks\": [string], \"blockers\": [string], \"next_steps\": [string]}. "
         "Write premium, client-ready PowerPoint copy in 120-150 words for a delivery governance status deck. "
         "Use the exact evidence below; do not invent progress, dates, people, budget, or milestones. "
         "Structure the copy as three concise labeled lines: Delivery position, Risk posture, Leadership actions. "
@@ -221,9 +232,77 @@ def _llm_summary(report: GeneratedReport, projects: list[Project], statuses: lis
     )
     try:
         text, _ = generate_text(llm.provider, prompt, llm.model)
-        return _clean_llm_text(_text(text, fallback))
+        narrative = ReportNarrative.model_validate(json.loads(text))
+        return _clean_llm_text(narrative.executive_summary)
     except Exception:
         return fallback
+
+
+def _template_values(report: GeneratedReport, projects: list[Project], statuses: list[WeeklyStatus], db: Session, summary: str) -> dict[str, str]:
+    account_id = _scope_value(report.scope, "account")
+    account = db.get(Account, account_id) if account_id else None
+    metrics = _metrics(statuses, projects)
+    achievements = [
+        _short(status.fields.get("achievements"), 180)
+        for status in statuses
+        if _is_meaningful(status.fields.get("achievements"))
+    ]
+    risks = [
+        _short(status.fields.get("risks"), 180)
+        for status in statuses
+        if _is_meaningful(status.fields.get("risks"))
+    ]
+    blockers = [
+        _short(status.fields.get("blockers"), 180)
+        for status in statuses
+        if _is_meaningful(status.fields.get("blockers"))
+    ]
+    next_steps = [
+        _short(status.fields.get("nextWeekPlan"), 180)
+        for status in statuses
+        if _is_meaningful(status.fields.get("nextWeekPlan"))
+    ]
+    overall_status = "Red" if metrics["health_counts"]["Red"] else "Amber" if metrics["health_counts"]["Amber"] else "Green"
+    return {
+        "ACCOUNT_NAME": account.name if account else "All Accounts",
+        "PROJECT_NAME": ", ".join(project.name for project in projects) or "All Projects",
+        "REPORT_DATE": report.generated_at.strftime("%d %b %Y") if report.generated_at else "",
+        "OVERALL_STATUS": overall_status,
+        "EXECUTIVE_SUMMARY": summary,
+        "ACHIEVEMENTS": "\n".join(f"- {item}" for item in achievements[:8]) or "No achievements reported",
+        "RISKS": "\n".join(f"- {item}" for item in risks[:8]) or "No risks reported",
+        "BLOCKERS": "\n".join(f"- {item}" for item in blockers[:8]) or "No blockers reported",
+        "NEXT_STEPS": "\n".join(f"- {item}" for item in next_steps[:8]) or "No next steps reported",
+        "PROJECT_METRICS": f"Projects: {metrics['project_count']} | Updates: {metrics['status_count']} | Completion: {metrics['avg_completion']}% | Blockers: {metrics['blocker_count']}",
+    }
+
+
+def _populate_template(prs: Presentation, values: dict[str, str]) -> bool:
+    replaced = False
+
+    def replace_text(text: str) -> str:
+        nonlocal replaced
+        updated = text
+        for key, value in values.items():
+            for token in (f"{{{{{key}}}}}", f"[{key}]", key):
+                if token in updated:
+                    updated = updated.replace(token, value)
+                    replaced = True
+        return updated
+
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False):
+                updated = replace_text(shape.text)
+                if updated != shape.text:
+                    shape.text = updated
+            if getattr(shape, "has_table", False):
+                for row in shape.table.rows:
+                    for cell in row.cells:
+                        updated = replace_text(cell.text)
+                        if updated != cell.text:
+                            cell.text = updated
+    return replaced
 
 
 def generate_report_file(db: Session, report_id: str, llm: LLMSelection | None = None) -> str:
@@ -257,6 +336,7 @@ def _generate_ppt(path: Path, report: GeneratedReport, projects: list[Project], 
 
     metrics = _metrics(statuses, projects)
     summary_text = _llm_summary(report, projects, statuses, llm)
+    _populate_template(prs, _template_values(report, projects, statuses, db, summary_text))
 
     summary = prs.slides.add_slide(prs.slide_layouts[5] if len(prs.slide_layouts) > 5 else prs.slide_layouts[0])
     _set_slide_title(summary, "Executive Delivery Summary")

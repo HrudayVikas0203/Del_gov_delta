@@ -1,19 +1,17 @@
-﻿import uuid
-from pathlib import Path
+﻿from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.responses import FileResponse
 
-from app.core.config import get_settings
 from app.core.security import get_current_user, require_min_role
 from app.db.session import get_db
-from app.models.delivery import Account, Project
+from app.models.delivery import Project
 from app.models.people import Employee, Role
 from app.models.status import GeneratedReport, ReportFormat, ReportTemplate
 from app.reports.generator import generate_report_file
-from app.schemas.common import LLMSelection, ReportCreate, ReportOut, ReportTemplateOut
+from app.schemas.common import ReportCreate, ReportOut
 from app.services.audit import audit
 from app.workers.tasks import generate_report_task
 
@@ -24,6 +22,27 @@ def _match_report_template(db: Session, payload: ReportCreate) -> ReportTemplate
     requested_type = payload.report_format.value
     project_id = payload.project_id or None
     account_id = payload.account_id or None
+
+    if project_id:
+        project = db.get(Project, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if account_id and account_id != project.account_id:
+            raise HTTPException(status_code=400, detail="Project does not belong to selected account")
+        account_id = project.account_id
+
+    if account_id and requested_type == ReportFormat.PPTX.value:
+        account_template = db.scalar(
+            select(ReportTemplate)
+            .where(
+                ReportTemplate.account_id == account_id,
+                ReportTemplate.project_id.is_(None),
+                ReportTemplate.file_type == requested_type,
+            )
+            .order_by(ReportTemplate.uploaded_at.desc())
+        )
+        if account_template:
+            return account_template
 
     if project_id:
         project_template = db.scalar(
@@ -52,9 +71,19 @@ def _match_report_template(db: Session, payload: ReportCreate) -> ReportTemplate
 
 @router.post("", response_model=ReportOut, status_code=201)
 def create_report(payload: ReportCreate, db: Session = Depends(get_db), actor: Employee = Depends(require_min_role(Role.PROJECT_MANAGER))) -> GeneratedReport:
+    if payload.project_id:
+        project = db.get(Project, payload.project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if payload.account_id and payload.account_id != project.account_id:
+            raise HTTPException(status_code=400, detail="Project does not belong to selected account")
+        effective_account_id = project.account_id
+    else:
+        effective_account_id = payload.account_id
+
     scope_parts = [payload.scope]
-    if payload.account_id:
-        scope_parts.append(f"account:{payload.account_id}")
+    if effective_account_id:
+        scope_parts.append(f"account:{effective_account_id}")
     if payload.project_id:
         scope_parts.append(f"project:{payload.project_id}")
     if payload.employee_id:
@@ -78,10 +107,10 @@ def create_report(payload: ReportCreate, db: Session = Depends(get_db), actor: E
             )
         if payload.project_id and template.project_id and template.project_id != payload.project_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected template belongs to a different project")
-        if payload.account_id and template.account_id and template.account_id != payload.account_id:
+        if effective_account_id and template.account_id and template.account_id != effective_account_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected template belongs to a different account")
     else:
-        template = _match_report_template(db, payload)
+        template = _match_report_template(db, payload.model_copy(update={"account_id": effective_account_id}))
 
     report = GeneratedReport(
         title=payload.title,
@@ -118,62 +147,6 @@ def list_reports(db: Session = Depends(get_db), _: Employee = Depends(get_curren
 
 
 
-@router.post("/templates", response_model=ReportTemplateOut, status_code=201)
-def upload_report_template(
-    name: str = Form(...),
-    account_id: str | None = Form(None),
-    project_id: str | None = Form(None),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    actor: Employee = Depends(require_min_role(Role.PROJECT_MANAGER)),
-) -> ReportTemplate:
-    settings = get_settings()
-    extension = Path(file.filename).suffix.lower()
-    if extension not in {".pptx", ".pdf"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PPTX and PDF templates are supported")
-    if account_id and not db.get(Account, account_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    if project_id:
-        project = db.get(Project, project_id)
-        if not project:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-        if account_id and project.account_id != account_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project does not belong to selected account")
-        account_id = project.account_id
-
-    template_dir = settings.templates_dir
-    saved_path = template_dir / f"{uuid.uuid4()}{extension}"
-
-    with saved_path.open("wb") as f:
-        f.write(file.file.read())
-
-    template = ReportTemplate(
-        name=name,
-        file_path=str(saved_path),
-        file_type=extension.lstrip("."),
-        account_id=account_id,
-        project_id=project_id,
-        uploaded_by_id=actor.id,
-    )
-    db.add(template)
-    db.commit()
-    db.refresh(template)
-    return template
-
-
-@router.get("/templates", response_model=list[ReportTemplateOut])
-def list_report_templates(
-    account_id: str | None = None,
-    project_id: str | None = None,
-    db: Session = Depends(get_db),
-    _: Employee = Depends(get_current_user),
-) -> list[ReportTemplate]:
-    stmt = select(ReportTemplate).order_by(ReportTemplate.uploaded_at.desc())
-    if project_id:
-        stmt = stmt.where((ReportTemplate.project_id == project_id) | (ReportTemplate.project_id.is_(None)))
-    if account_id:
-        stmt = stmt.where((ReportTemplate.account_id == account_id) | (ReportTemplate.account_id.is_(None)))
-    return list(db.scalars(stmt).all())
 @router.get("/{report_id}/download")
 def download_report(report_id: str, db: Session = Depends(get_db), _: Employee = Depends(get_current_user)) -> FileResponse:
     report = db.get(GeneratedReport, report_id)

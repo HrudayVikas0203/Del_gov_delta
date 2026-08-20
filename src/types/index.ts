@@ -42,6 +42,9 @@ export interface Account {
   status: 'Active' | 'Proposal' | 'Completed' | 'On Hold';
   health: 'green' | 'amber' | 'red';
   deliveryManagerId: string;
+  pptTemplateId?: string | null;
+  pptTemplateFilename?: string | null;
+  pptTemplateStatus?: 'configured' | 'not_configured';
   startDate?: string;
   endDate?: string;
 }

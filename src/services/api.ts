@@ -147,12 +147,14 @@ export async function apiCreateReport(payload: unknown, token: string) {
   return normalizeReport(report);
 }
 
-export async function apiListReportTemplates(token: string) {
-  return request<any[]>('/reports/templates', { method: 'GET' }, token);
+export async function apiUploadAccountTemplate(accountId: string, file: File, token: string) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return request<any>(`/governance/accounts/${accountId}/template`, { method: 'POST', body: formData }, token);
 }
 
-export async function apiUploadReportTemplate(formData: FormData, token: string) {
-  return request<any>('/reports/templates', { method: 'POST', body: formData }, token);
+export async function apiDeleteAccountTemplate(accountId: string, token: string) {
+  return request<void>(`/governance/accounts/${accountId}/template`, { method: 'DELETE' }, token);
 }
 
 export async function apiDownloadReport(reportId: string, token: string) {

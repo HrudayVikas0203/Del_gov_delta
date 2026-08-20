@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { FileText, Download, FileSpreadsheet, Presentation, File, Filter, Plus, Loader2, Check } from 'lucide-react';
 import { useStore } from '../store/useStore';
-import { apiCreateReport, apiDownloadReport, apiListReportTemplates, apiListProviders, apiListReports } from '../services/api';
-import type { Employee, GeneratedReport, ReportTemplate, LLMProvider } from '../types';
+import { apiCreateReport, apiDownloadReport, apiListProviders, apiListReports } from '../services/api';
+import type { Employee, GeneratedReport, LLMProvider } from '../types';
 import { getManageableEmployees, getManageableProjects, getProjectTeam } from '../utils/governance';
 
 type ReportRoleKey = 'program' | 'projectManager' | 'architect' | 'developer' | 'qa' | 'devops' | 'intern';
@@ -103,8 +103,6 @@ export default function Reports() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
   const [selectedReportRole, setSelectedReportRole] = useState<ReportRoleKey>('developer');
   const [statusFrequency, setStatusFrequency] = useState<'all' | 'daily' | 'weekly' | 'monthly'>('weekly');
-  const [templates, setTemplates] = useState<ReportTemplate[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [providers, setProviders] = useState<LLMProvider[]>([]);
   const [selectedProviderName, setSelectedProviderName] = useState<string>('');
   const [selectedProviderModel, setSelectedProviderModel] = useState<string | null>(null);
@@ -119,19 +117,6 @@ export default function Reports() {
         setLoadError(error instanceof Error ? error.message : 'Unable to load reports from backend');
       });
   }, [authToken, setReports]);
-
-  useEffect(() => {
-    if (!authToken) return;
-
-    apiListReportTemplates(authToken)
-      .then((backendTemplates) => {
-        setTemplates(backendTemplates);
-        setSelectedTemplateId((current) => current || backendTemplates[0]?.id || null);
-      })
-      .catch((error) => {
-        console.error('Failed to load report templates:', error);
-      });
-  }, [authToken]);
 
   useEffect(() => {
     if (!authToken) return;
@@ -238,9 +223,6 @@ export default function Reports() {
     } as const;
 
     const requestedFormat = formatMap[template.format];
-    const selectedTemplate = templates.find((item) => item.id === selectedTemplateId);
-    const matchingTemplateId = selectedTemplate?.file_type === requestedFormat ? selectedTemplate.id : undefined;
-
     const payload = {
       title: `${template.label}${titleSuffix} â€” ${new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`,
       report_type: reportTypeMap[template.type] || 'executive_summary',
@@ -250,7 +232,6 @@ export default function Reports() {
       project_id: (reportScopeMode === 'project' || reportScopeMode === 'individual') ? selectedProjectId : undefined,
       employee_id: reportScopeMode === 'individual' ? selectedEmployeeId : undefined,
       status_frequency: statusFrequency === 'all' ? undefined : statusFrequency,
-      template_id: matchingTemplateId,
       llm: currentProvider?.configured ? { provider: selectedProviderName, model: selectedProviderModel } : undefined,
       use_celery: false,
     };
@@ -474,27 +455,21 @@ export default function Reports() {
         <div className="space-y-4 bg-surface border border-border rounded-2xl p-4 shadow-sm">
           <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-ink">Select report template</h3>
-              <p className="text-xs text-ink-soft">Choose a stored PPTX/PDF template to apply to your next export.</p>
-              <select
-                value={selectedTemplateId ?? ''}
-                onChange={(e) => setSelectedTemplateId(e.target.value || null)}
-                className="w-full text-xs px-3 py-2 rounded-lg border border-border bg-surface text-ink font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-              >
-                <option value="">Default generated layout</option>
-                {templates
-                  .filter((template) => {
-                    if (selectedProjectId && template.project_id && template.project_id !== selectedProjectId) return false;
-                    const account = accounts.find((acc) => acc.name === selectedScopeAccount);
-                    if (account?.id && template.account_id && template.account_id !== account.id) return false;
-                    return true;
-                  })
-                  .map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.name} ({template.file_type.toUpperCase()}{template.project_id ? ' / project' : template.account_id ? ' / account' : ' / global'})
-                  </option>
-                ))}
-              </select>
+              <h3 className="text-sm font-semibold text-ink">Account PPT template</h3>
+              <p className="text-xs text-ink-soft">Project reports automatically use the selected account's stored template.</p>
+              {selectedScopeAccount === 'All Accounts' ? (
+                <p className="text-xs text-ink-faint">Select an account to see its template configuration.</p>
+              ) : (
+                <div className="rounded-lg border border-border bg-surface-alt/40 px-3 py-2 text-xs">
+                  {accounts.find((account) => account.name === selectedScopeAccount)?.pptTemplateStatus === 'configured' ? (
+                    <span className="text-success font-semibold">
+                      Configured: {accounts.find((account) => account.name === selectedScopeAccount)?.pptTemplateFilename}
+                    </span>
+                  ) : (
+                    <span className="text-warning font-semibold">No PPT template configured for this account.</span>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="space-y-3">

@@ -1,5 +1,4 @@
 import hashlib
-import os
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -11,10 +10,6 @@ from sqlalchemy.engine import make_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-def log_database_debug(settings: "Settings") -> None:
-    return
-
-
 def resolve_app_path(value: str) -> Path:
     path = Path(value)
     if path.is_absolute():
@@ -227,10 +222,6 @@ class Settings(BaseSettings):
         path = resolve_app_path(self.report_templates_dir)
         path.mkdir(parents=True, exist_ok=True)
         return path
-
-
-def log_database_diagnostics(settings: Settings) -> None:
-    return
 
 
 @lru_cache

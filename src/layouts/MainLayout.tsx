@@ -69,6 +69,9 @@ export default function MainLayout() {
           health: a.health || 'green',
           deliveryManagerId: a.delivery_head_id || '',
           studioId: '',
+          pptTemplateId: a.ppt_template_id || null,
+          pptTemplateFilename: a.ppt_template_filename || null,
+          pptTemplateStatus: a.ppt_template_status || 'not_configured',
         })));
         setProjects(proj.map(p => ({
           id: p.id,
