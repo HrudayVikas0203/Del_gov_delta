@@ -27,4 +27,6 @@ The frontend uses `http://127.0.0.1:8000` only in development. Vercel must defin
 VITE_API_URL=https://del-gov-delta.onrender.com
 ```
 
+The production client also contains this public Render URL as a safe fallback, so a missing Vercel preview variable cannot redirect API requests to the frontend origin. Configure `VITE_API_URL` in Vercel anyway so environment-specific backends can be selected without a code change.
+
 This variable is public routing configuration, not a secret. API keys and database credentials belong only in the Render backend environment. See [backend/README.md](backend/README.md) for production configuration and account PPT template persistence details.

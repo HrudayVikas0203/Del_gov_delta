@@ -1,10 +1,9 @@
+export const PRODUCTION_API_BASE_URL = 'https://del-gov-delta.onrender.com';
+
 export function resolveApiBaseUrl(rawUrl: string | undefined, isDev: boolean): string {
   const configured = rawUrl?.trim();
   if (!configured) {
-    if (!isDev) {
-      throw new Error('VITE_API_URL must be configured for production builds.');
-    }
-    return 'http://127.0.0.1:8000';
+    return isDev ? 'http://127.0.0.1:8000' : PRODUCTION_API_BASE_URL;
   }
 
   let parsed: URL;

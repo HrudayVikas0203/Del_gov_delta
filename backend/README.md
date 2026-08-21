@@ -40,7 +40,7 @@ Start command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Health check: /health
 ```
 
-Set `DATABASE_URL`, `SECRET_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `BACKEND_CORS_ORIGINS`, and `CORS_ORIGIN_REGEX` in Render. In the Vercel project settings, set the public build variable `VITE_API_URL=https://del-gov-delta.onrender.com` for Production and Preview, then redeploy. The frontend intentionally refuses to use its own Vercel origin as an implicit production API. Keep API keys, database credentials, `SMTP_USER`, and `SMTP_PASSWORD` only on Render; never add secrets to `VITE_*` variables.
+Set `DATABASE_URL`, `SECRET_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `BACKEND_CORS_ORIGINS`, and `CORS_ORIGIN_REGEX` in Render. In the Vercel project settings, set the public build variable `VITE_API_URL=https://del-gov-delta.onrender.com` for Production and Preview, then redeploy. If that public variable is accidentally omitted, the production bundle uses the same Render API URL as a safe fallback and never sends API writes to the Vercel frontend origin. Keep API keys, database credentials, `SMTP_USER`, and `SMTP_PASSWORD` only on Render; never add secrets to `VITE_*` variables.
 
 Account PPT templates are validated and stored as database BLOBs. `report_templates.file_path` remains only as backward-compatible metadata and is not used to retrieve account templates. Startup schema upgrades add the BLOB metadata columns idempotently and never drop or reset existing data. Existing legacy rows without `content_bytes` remain intact but must be replaced through the account template UI before report generation.
 

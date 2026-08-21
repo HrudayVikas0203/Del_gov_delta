@@ -4,12 +4,14 @@ import test from 'node:test';
 import {
   buildApiUrl,
   isRetryableMethod,
+  PRODUCTION_API_BASE_URL,
   resolveApiBaseUrl,
   shouldClearAuthentication,
 } from '../src/services/apiConfig.ts';
 
-test('production requires an explicit API URL', () => {
-  assert.throws(() => resolveApiBaseUrl(undefined, false), /VITE_API_URL/);
+test('production never falls back to the frontend origin', () => {
+  assert.equal(resolveApiBaseUrl(undefined, false), PRODUCTION_API_BASE_URL);
+  assert.equal(resolveApiBaseUrl(undefined, false), 'https://del-gov-delta.onrender.com');
 });
 
 test('API base normalization never duplicates api/v1', () => {

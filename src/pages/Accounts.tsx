@@ -14,6 +14,7 @@ export default function Accounts() {
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [accountTemplateFile, setAccountTemplateFile] = useState<File | null>(null);
   const [accountTemplateStatus, setAccountTemplateStatus] = useState<string | null>(null);
+  const [isSavingAccount, setIsSavingAccount] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [newAccountData, setNewAccountData] = useState({
     name: '',
@@ -72,13 +73,14 @@ export default function Accounts() {
 
   const handleCreateAccount = async (e: FormEvent) => {
     e.preventDefault();
-    if (!authToken) return;
+    if (!authToken || isSavingAccount) return;
 
     if (!newAccountData.name.trim()) {
       setAccountTemplateStatus('Account name is required.');
       return;
     }
 
+    setIsSavingAccount(true);
     try {
       const payload = {
         name: newAccountData.name.trim(),
@@ -137,6 +139,8 @@ export default function Accounts() {
     } catch (err) {
       console.error(err);
       setAccountTemplateStatus(err instanceof Error ? err.message : 'Failed to save account');
+    } finally {
+      setIsSavingAccount(false);
     }
   };
 
@@ -461,7 +465,14 @@ export default function Accounts() {
             
             <div className="p-4 border-t border-border flex justify-end gap-3 bg-surface-alt rounded-b-xl">
               <button type="button" onClick={() => { setIsAddingAccount(false); resetAccountForm(); }} className="px-4 py-2 text-sm font-semibold text-ink-soft hover:text-ink transition-colors">Cancel</button>
-              <button type="submit" form="createAccountForm" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm">{editingAccountId ? 'Save Changes' : 'Create Account'}</button>
+              <button
+                type="submit"
+                form="createAccountForm"
+                disabled={isSavingAccount}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-wait text-white text-sm font-semibold rounded-lg transition-colors shadow-sm"
+              >
+                {isSavingAccount ? 'Saving…' : editingAccountId ? 'Save Changes' : 'Create Account'}
+              </button>
             </div>
           </div>
         </div>
