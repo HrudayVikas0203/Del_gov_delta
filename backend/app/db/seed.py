@@ -17,6 +17,7 @@ from app.models.people import Employee, Role
 from app.models.status import AIInsight, GeneratedReport, ReportFormat, ReportType, ReportTemplate, SubmissionStatus, WeeklyStatus
 from app.models.tasks import Task, TaskAssignment, TaskPriority, TaskStatus
 from app.reports.generator import generate_report_file
+from app.services.template_storage import store_account_template, validate_pptx_upload
 
 
 DEMO_PASSWORD = "Demo@123"
@@ -369,32 +370,19 @@ def seed() -> None:
             _weekly_status(db, trimble_frontend.id, trimble_project.id, week_start_date, status=SubmissionStatus.SUBMITTED, submitted_at=datetime.now(timezone.utc), fields={**status_fields, "achievements": "Completed the approval queue UX and exception dashboard refinements for finance users.", "hoursWorked": status_fields["hoursWorked"] - 2})
             _weekly_status(db, trimble_qa.id, trimble_project.id, week_start_date, status=SubmissionStatus.APPROVED if offset >= 2 else SubmissionStatus.SUBMITTED, submitted_at=datetime.now(timezone.utc), fields={**status_fields, "achievements": "Regression suite updated for AI recommendation confidence and approval SLA checks.", "blockers": "None; all critical issues are mitigated before release candidate validation.", "hoursWorked": 34 + offset * 5})
 
-        trimble_template = db.query(ReportTemplate).filter(ReportTemplate.project_id == trimble_project.id).one_or_none()
-        if trimble_template is None:
-            trimble_template = ReportTemplate(
-                name="Trimble Finance AI Assistant Status Template",
-                file_path=str(trimble_template_path),
-                file_type="pptx",
-                account_id=trimble_account.id,
-                project_id=trimble_project.id,
-                uploaded_by_id=trimble_pm.id,
+        trimble_template = db.query(ReportTemplate).filter(
+            ReportTemplate.account_id == trimble_account.id,
+            ReportTemplate.project_id.is_(None),
+            ReportTemplate.file_type == "pptx",
+        ).one_or_none()
+        if trimble_template is None or not trimble_template.content_bytes:
+            content = trimble_template_path.read_bytes()
+            validated = validate_pptx_upload(
+                trimble_template_path.name,
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                content,
             )
-            db.add(trimble_template)
-            db.flush()
-
-        trimble_report = db.query(GeneratedReport).filter(GeneratedReport.template_id == trimble_template.id).one_or_none()
-        if trimble_report is None:
-            trimble_report = GeneratedReport(
-                title="Trimble Finance AI Assistant Weekly Status",
-                report_type=ReportType.PROJECT_REPORT,
-                report_format=ReportFormat.PPTX,
-                scope=f"project:{trimble_project.id} period:weekly",
-                template_id=trimble_template.id,
-                generated_by_id=trimble_pm.id,
-            )
-            db.add(trimble_report)
-            db.flush()
-            generate_report_file(db, trimble_report.id, None)
+            trimble_template = store_account_template(db, trimble_account.id, validated, trimble_pm.id)
 
         _weekly_status(db, sr_dev.id, proj1.id, week_start, status=SubmissionStatus.SUBMITTED, submitted_at=datetime.now(timezone.utc), fields={"achievements": "Completed API integration shell and started payment gateway mapping.", "blockers": "Client credentials pending.", "overallStatus": "Amber", "completionPercent": 72, "hoursWorked": 41})
         _weekly_status(db, qa.id, proj1.id, week_start, status=SubmissionStatus.DRAFT, fields={"achievements": "Regression suite updated.", "blockers": "Waiting for stable UAT build.", "overallStatus": "Green", "completionPercent": 68, "hoursWorked": 38})

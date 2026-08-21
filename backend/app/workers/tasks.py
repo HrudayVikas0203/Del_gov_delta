@@ -11,7 +11,15 @@ def generate_report_task(report_id: str) -> str:
     with SessionLocal() as db:
         report = db.get(GeneratedReport, report_id)
         llm = LLMSelection(provider=report.llm_provider, model=report.llm_model) if report and report.llm_provider else None
-        return generate_report_file(db, report_id, llm)
+        try:
+            return generate_report_file(db, report_id, llm)
+        except Exception:
+            db.rollback()
+            report = db.get(GeneratedReport, report_id)
+            if report is not None:
+                report.status = "failed"
+                db.commit()
+            raise
 
 
 @celery_app.task(name="rag.index_statuses")

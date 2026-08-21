@@ -44,8 +44,19 @@ def analyze_template(path: str | Path) -> TemplateStructure:
                 rows = []
             if getattr(shape, "has_chart", False):
                 element_type = "chart"
+            element_id = f"slide_{slide_index}_shape_{shape_index}"
             if text or rows or element_type in {"placeholder", "chart"}:
-                elements.append(TemplateElement(id=f"slide_{slide_index}_shape_{shape_index}", type=element_type, text=text, placeholder_type=placeholder_type, rows=rows))
+                elements.append(TemplateElement(id=element_id, type=element_type, text=text, placeholder_type=placeholder_type, rows=rows))
+            if getattr(shape, "has_table", False):
+                for row_index, row in enumerate(shape.table.rows):
+                    for cell_index, cell in enumerate(row.cells):
+                        elements.append(
+                            TemplateElement(
+                                id=f"{element_id}_cell_{row_index}_{cell_index}",
+                                type="table_cell",
+                                text=cell.text,
+                            )
+                        )
         title = slide.shapes.title.text if slide.shapes.title else None
         slides.append(TemplateSlide(slide_index=slide_index, title=title, elements=elements))
     return TemplateStructure(slide_width=prs.slide_width, slide_height=prs.slide_height, slide_count=len(prs.slides), slides=slides)

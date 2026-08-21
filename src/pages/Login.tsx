@@ -22,14 +22,12 @@ const DEMO_ACCOUNTS = [
   { label: 'Trimble QA (Aisha)',           email: 'aisha.khan@trimble.com',       color: 'bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-50 hover:border-orange-300' },
 ] as const;
 
-const VALID_EMAILS = new Set<string>(DEMO_ACCOUNTS.map(a => a.email));
-
 export default function Login() {
   const navigate = useNavigate();
   const { login, setAuthToken, setCurrentUser } = useStore();
 
   const [email, setEmail] = useState('praveen.baburaya@delta.com');
-  const [password, setPassword] = useState('Demo@123');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -38,22 +36,12 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    const isSupportedDemoDomain = email.toLowerCase().endsWith('@delta.com') || email.toLowerCase().endsWith('@trimble.com');
-    if (!isSupportedDemoDomain) {
-      setError('Enter a valid @delta.com or @trimble.com email address.');
+    if (!email.trim() || !password) {
+      setError('Enter your email address and password.');
       return;
     }
 
-    const emailLower = email.toLowerCase();
-    if (!VALID_EMAILS.has(emailLower)) {
-      setError('This email is not registered. Please use one of the demo accounts.');
-      return;
-    }
-
-    if (password !== 'Demo@123') {
-      setError('Incorrect password. Hint: Demo@123');
-      return;
-    }
+    const emailLower = email.trim().toLowerCase();
 
     setIsLoading(true);
     try {
@@ -108,67 +96,11 @@ export default function Login() {
   };
 
   const handleSSO = async () => {
-    setError('');
-    const emailLower = email.toLowerCase();
-    if (!VALID_EMAILS.has(emailLower)) {
-      setError('Prefill a valid demo account first, then use SSO.');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const { access_token } = await apiLogin(emailLower, 'Demo@123');
-      setAuthToken(access_token);
-      
-      const { apiMe } = await import('../services/api');
-      const user = await apiMe(access_token);
-
-      const mapRoleCategory = (role: string, department?: string) => {
-        if (role === 'delivery_head') return 'Studio Head';
-        if (role === 'program_manager') return 'Program Manager';
-        if (role === 'project_manager') return 'Manager';
-        if (role === 'team_lead') return 'Architect';
-        if (role === 'developer') {
-          if (department === 'Quality Assurance') return 'QA';
-          if (department === 'Platform' || department === 'DevOps') return 'DevOps';
-          return 'Developer';
-        }
-        if (role === 'qa') return 'QA';
-        if (role === 'devops') return 'DevOps';
-        if (role === 'intern') return 'Intern';
-        return 'Developer';
-      };
-
-      setCurrentUser({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        title: user.title,
-        roleCategory: mapRoleCategory(user.role, user.department) as any,
-        dept: user.department,
-        location: user.location,
-        managerId: user.manager_id || '',
-        managerName: '',
-        projectId: '',
-        skills: user.skills || [],
-        experience: '5 years',
-        joined: '2023-01-01',
-        avatarColor: '#2563EB',
-        availability: 'Allocated',
-        bio: user.bio,
-      });
-      login(emailLower, access_token);
-      navigate('/dashboard');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to authenticate with backend');
-    } finally {
-      setIsLoading(false);
-    }
+    setError('Microsoft Entra ID sign-in is not configured for this environment.');
   };
 
   const selectDemoAccount = (demoEmail: string) => {
     setEmail(demoEmail);
-    setPassword('Demo@123');
     setError('');
   };
 
@@ -270,10 +202,7 @@ export default function Login() {
                 </button>
               ))}
             </div>
-            <p className="text-[11px] text-ink-faint mt-2.5">
-              Click a role to prefill credentials. Password for all:&nbsp;
-              <span className="font-mono font-bold text-blue-700">Demo@123</span>
-            </p>
+            <p className="text-[11px] text-ink-faint mt-2.5">Click a role to prefill its demo email address.</p>
           </div>
 
           {/* ── login form ── */}

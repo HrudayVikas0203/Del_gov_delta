@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from pptx import Presentation
 from pptx.util import Inches
 
-from app.ai.ppt_mapping import PPTMapping, map_with_gemini
+from app.ai.ppt_mapping import GeminiMappingConfigurationError, GeminiMappingError, PPTMapping, map_with_gemini
 from app.ai.gemini_response import GeminiResponseError, extract_gemini_text, parse_gemini_json
 from app.ai.template_analysis import analyze_template
 from app.core.config import get_settings
@@ -36,14 +36,13 @@ def test_gemini_mapping_validates_structured_response(monkeypatch, tmp_path):
 
     class FakeModels:
         def generate_content(self, **_kwargs):
-            return SimpleNamespace(text='{"account_name":"Account A","project_name":"Project A1","slides":[{"slide_index":0,"fields":{"PROJECT_NAME":"Project A1","ACHIEVEMENTS":["Completed work"]}}]}')
+            return SimpleNamespace(text='{"slides":[{"slide_index":0,"element_fields":{"slide_0_shape_0":["PROJECT_NAME"],"slide_0_shape_1":["ACHIEVEMENTS"]}}]}')
 
     monkeypatch.setattr("google.genai.Client", lambda **_kwargs: SimpleNamespace(models=FakeModels()))
     monkeypatch.setattr("app.ai.ppt_mapping.get_settings", lambda: SimpleNamespace(gemini_api_key="configured", gemini_default_model="gemini-2.5-flash"))
     mapping = map_with_gemini(analyze_template(path), {"project": [{"name": "Project A1"}]})
     assert isinstance(mapping, PPTMapping)
-    assert mapping.project_name == "Project A1"
-    assert mapping.slides[0].fields["ACHIEVEMENTS"] == ["Completed work"]
+    assert mapping.slides[0].element_fields["slide_0_shape_1"] == ["ACHIEVEMENTS"]
 
 
 def test_gemini_text_extractor_ignores_thought_signature():
@@ -65,15 +64,14 @@ def test_gemini_mapping_accepts_fenced_json_with_non_text_parts(monkeypatch, tmp
     class FakeModels:
         def generate_content(self, **_kwargs):
             return SimpleNamespace(candidates=[SimpleNamespace(content=SimpleNamespace(parts=[
-                SimpleNamespace(text='```json\n{"account_name":"Account A","project_name":"Project A1","slides":[]}\n```'),
+                SimpleNamespace(text='```json\n{"slides":[{"slide_index":0,"element_fields":{"slide_0_shape_0":["PROJECT_NAME"]}}]}\n```'),
                 SimpleNamespace(thought_signature="ignored"),
             ]))])
 
     monkeypatch.setattr("google.genai.Client", lambda **_kwargs: SimpleNamespace(models=FakeModels()))
     monkeypatch.setattr("app.ai.ppt_mapping.get_settings", lambda: SimpleNamespace(gemini_api_key="configured", gemini_default_model="gemini-3.5-flash"))
     mapping = map_with_gemini(analyze_template(path), {})
-    assert mapping.account_name == "Account A"
-    assert mapping.project_name == "Project A1"
+    assert mapping.slides[0].element_fields["slide_0_shape_0"] == ["PROJECT_NAME"]
 
 
 def test_malformed_gemini_mapping_response_is_actionable(monkeypatch, tmp_path):
@@ -89,8 +87,7 @@ def test_malformed_gemini_mapping_response_is_actionable(monkeypatch, tmp_path):
     try:
         map_with_gemini(analyze_template(path), {})
     except RuntimeError as exc:
-        assert "invalid PPT mapping JSON" in str(exc)
-        assert "not valid JSON" in str(exc)
+        assert "invalid PPT mapping response" in str(exc)
     else:
         raise AssertionError("Expected an actionable malformed JSON error")
 
@@ -118,7 +115,7 @@ def test_gemini_mapping_without_text_parts_is_actionable(monkeypatch, tmp_path):
     try:
         map_with_gemini(analyze_template(path), {})
     except RuntimeError as exc:
-        assert "no usable text content for PPT mapping" in str(exc)
+        assert "invalid PPT mapping response" in str(exc)
     else:
         raise AssertionError("Expected missing Gemini text to fail clearly")
 
@@ -138,7 +135,7 @@ def test_shape_targeted_mapping_populates_all_status_fields(tmp_path):
 
     structure = analyze_template(path)
     element_fields = {
-        element.id: {fields[index]: fields[index]}
+        element.id: [fields[index]]
         for index, element in enumerate(structure.slides[0].elements)
     }
     mapping = PPTMapping(slides=[{"slide_index": 0, "element_fields": element_fields}])
@@ -179,11 +176,45 @@ def test_token_based_mapping_remains_supported(tmp_path):
     assert "Token achievement" in text
 
 
-def test_gemini_mapping_requires_exact_model(monkeypatch):
-    monkeypatch.setattr("app.ai.ppt_mapping.get_settings", lambda: SimpleNamespace(gemini_api_key="configured", gemini_default_model="wrong-model"))
+def test_gemini_mapping_requires_api_key(monkeypatch):
+    monkeypatch.setattr("app.ai.ppt_mapping.get_settings", lambda: SimpleNamespace(gemini_api_key=None, gemini_default_model="gemini-3.5-flash"))
     try:
         map_with_gemini(SimpleNamespace(model_dump_json=lambda: "{}"), {})
-    except RuntimeError as exc:
-        assert "gemini-2.5-flash" in str(exc)
+    except GeminiMappingConfigurationError as exc:
+        assert "not configured" in str(exc)
     else:
-        raise AssertionError("Expected exact Gemini model validation")
+        raise AssertionError("Expected missing Gemini configuration to fail")
+
+
+def test_invalid_gemini_model_is_controlled(monkeypatch):
+    class FakeModels:
+        def generate_content(self, **_kwargs):
+            raise ValueError("model does not exist")
+
+    monkeypatch.setattr("google.genai.Client", lambda **_kwargs: SimpleNamespace(models=FakeModels()))
+    monkeypatch.setattr("app.ai.ppt_mapping.get_settings", lambda: SimpleNamespace(gemini_api_key="configured", gemini_default_model="invalid-model"))
+    try:
+        map_with_gemini(SimpleNamespace(model_dump_json=lambda: "{}"), {})
+    except GeminiMappingError as exc:
+        assert str(exc) == "Gemini PPT mapping failed."
+        assert "configured" not in str(exc)
+    else:
+        raise AssertionError("Expected invalid Gemini model to fail safely")
+
+
+def test_empty_gemini_mapping_is_rejected(monkeypatch, tmp_path):
+    path = tmp_path / "account-template.pptx"
+    _template(path)
+
+    class FakeModels:
+        def generate_content(self, **_kwargs):
+            return SimpleNamespace(text='{"slides":[{"slide_index":0,"element_fields":{}}]}')
+
+    monkeypatch.setattr("google.genai.Client", lambda **_kwargs: SimpleNamespace(models=FakeModels()))
+    monkeypatch.setattr("app.ai.ppt_mapping.get_settings", lambda: SimpleNamespace(gemini_api_key="configured", gemini_default_model="gemini-3.5-flash"))
+    try:
+        map_with_gemini(analyze_template(path), {})
+    except RuntimeError as exc:
+        assert "empty PPT mapping" in str(exc)
+    else:
+        raise AssertionError("Expected empty mapping to be rejected")

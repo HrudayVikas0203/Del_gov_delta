@@ -20,6 +20,9 @@ MYSQL_COLUMNS: dict[str, dict[str, str]] = {
         "content_type": "VARCHAR(120) NULL",
         "size_bytes": "INTEGER NULL",
         "content_bytes": "MEDIUMBLOB NULL",
+        "content_sha256": "VARCHAR(64) NULL",
+        "is_active": "BOOLEAN NOT NULL DEFAULT TRUE",
+        "updated_at": "DATETIME NULL",
         "account_id": "VARCHAR(36) NULL",
         "project_id": "VARCHAR(36) NULL",
     },
@@ -29,6 +32,10 @@ MYSQL_COLUMNS: dict[str, dict[str, str]] = {
     "generated_reports": {
         "llm_provider": "VARCHAR(40) NULL",
         "llm_model": "VARCHAR(120) NULL",
+        "filename": "VARCHAR(255) NULL",
+        "content_type": "VARCHAR(120) NULL",
+        "size_bytes": "INTEGER NULL",
+        "content_bytes": "LONGBLOB NULL",
     },
 }
 
@@ -49,6 +56,9 @@ SQLITE_COLUMNS: dict[str, dict[str, str]] = {
         "content_type": "VARCHAR(120) NULL",
         "size_bytes": "INTEGER NULL",
         "content_bytes": "BLOB NULL",
+        "content_sha256": "VARCHAR(64) NULL",
+        "is_active": "BOOLEAN NOT NULL DEFAULT 1",
+        "updated_at": "DATETIME NULL",
         "account_id": "VARCHAR(36) NULL",
         "project_id": "VARCHAR(36) NULL",
     },
@@ -58,6 +68,10 @@ SQLITE_COLUMNS: dict[str, dict[str, str]] = {
     "generated_reports": {
         "llm_provider": "VARCHAR(40) NULL",
         "llm_model": "VARCHAR(120) NULL",
+        "filename": "VARCHAR(255) NULL",
+        "content_type": "VARCHAR(120) NULL",
+        "size_bytes": "INTEGER NULL",
+        "content_bytes": "BLOB NULL",
     },
 }
 

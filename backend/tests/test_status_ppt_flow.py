@@ -1,3 +1,4 @@
+import io
 import os
 import tempfile
 import uuid
@@ -115,6 +116,19 @@ def test_account_project_allocation_status_and_ppt_flow() -> None:
         headers=headers,
     )
     assert status_resp.status_code == 201, status_resp.text
+
+    template_path = Path(tempfile.gettempdir()) / f"flow-template-{uuid.uuid4().hex}.pptx"
+    template = Presentation()
+    template_slide = template.slides.add_slide(template.slide_layouts[6])
+    template_slide.shapes.add_textbox(1.0, 1.0, 8.0, 1.0).text = "{{PROJECT_NAME}}"
+    template.save(template_path)
+    with template_path.open("rb") as file_handle:
+        template_resp = client.post(
+            f"/api/v1/governance/accounts/{account_id}/template",
+            files={"file": (template_path.name, file_handle, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+            headers=headers,
+        )
+    assert template_resp.status_code == 201, template_resp.text
 
     report_resp = client.post(
         "/api/v1/reports",
@@ -279,7 +293,7 @@ def test_account_template_replace_remove_and_project_isolation() -> None:
         slide = prs.slides.add_slide(prs.slide_layouts[0])
         slide.shapes.title.text = "{{ACCOUNT_NAME}}"
         body = slide.shapes.add_textbox(1.5, 2.0, 8, 2.2)
-        body.text_frame.text = f"{{{{PROJECT_NAME}}}} {marker}"
+        body.text_frame.text = f"TEMPLATE_MARKER_{marker}"
         prs.save(path)
 
     account_a = create_account(f"Template A {uuid.uuid4().hex[:8]}")
@@ -323,6 +337,12 @@ def test_account_template_replace_remove_and_project_isolation() -> None:
     assert report_b.status_code == 201, report_b.text
     assert report_a.json()["template_id"] == template_a_id
     assert report_b.json()["template_id"] == template_b_id
+    text_a = "\n".join(shape.text for slide in Presentation(report_a.json()["file_path"]).slides for shape in slide.shapes if getattr(shape, "text", ""))
+    text_b = "\n".join(shape.text for slide in Presentation(report_b.json()["file_path"]).slides for shape in slide.shapes if getattr(shape, "text", ""))
+    assert "TEMPLATE_MARKER_A-REPLACED" in text_a
+    assert "TEMPLATE_MARKER_B" not in text_a
+    assert "TEMPLATE_MARKER_B" in text_b
+    assert "TEMPLATE_MARKER_A-REPLACED" not in text_b
 
     remove_response = client.delete(f"/api/v1/governance/accounts/{account_a}/template", headers=headers)
     assert remove_response.status_code == 204, remove_response.text
@@ -330,6 +350,23 @@ def test_account_template_replace_remove_and_project_isolation() -> None:
     account_response = client.get(f"/api/v1/governance/accounts/{account_a}", headers=headers)
     assert account_response.status_code == 200, account_response.text
     assert account_response.json()["ppt_template_status"] == "not_configured"
+
+    missing_report = client.post(
+        "/api/v1/reports",
+        json={"title": "A missing template", "report_type": "project_report", "report_format": "pptx", "scope": f"project:{project_a}", "project_id": project_a, "use_celery": False},
+        headers=headers,
+    )
+    assert missing_report.status_code == 400
+    assert missing_report.json()["detail"] == "Account PPT template is not configured."
+    assert "PackageNotFoundError" not in missing_report.text
+
+    b_still_works = client.post(
+        "/api/v1/reports",
+        json={"title": "B still works", "report_type": "project_report", "report_format": "pptx", "scope": f"project:{project_b}", "project_id": project_b, "use_celery": False},
+        headers=headers,
+    )
+    assert b_still_works.status_code == 201, b_still_works.text
+    assert b_still_works.json()["template_id"] == template_b_id
 
 
 def test_report_generation_retrieves_account_template_after_local_copy_is_removed(monkeypatch) -> None:
@@ -380,7 +417,9 @@ def test_report_generation_retrieves_account_template_after_local_copy_is_remove
         template = db.get(ReportTemplate, template_id)
         assert template is not None
         assert template.content_bytes
-        Path(template.file_path).unlink()
+        template.file_path = str(Path(tempfile.gettempdir()) / f"missing-render-template-{uuid.uuid4().hex}.pptx")
+        db.commit()
+        assert not Path(template.file_path).exists()
 
     materialized_paths = []
 
@@ -423,6 +462,12 @@ def test_trimble_finance_ai_assistant_seed_data_exists() -> None:
         weekly_statuses = db.query(WeeklyStatus).filter(WeeklyStatus.project_id == project.id).all()
         assert len(weekly_statuses) >= 4, "Expected weekly status updates for the Trimble project"
 
-        template = db.query(ReportTemplate).filter(ReportTemplate.project_id == project.id).one_or_none()
+        template = db.query(ReportTemplate).filter(
+            ReportTemplate.account_id == account.id,
+            ReportTemplate.project_id.is_(None),
+            ReportTemplate.is_active.is_(True),
+        ).one_or_none()
         assert template is not None, "Expected a report template for the Trimble project"
-        assert Path(template.file_path).exists(), template.file_path
+        assert template.file_path.startswith("database://")
+        assert template.content_bytes
+        assert Presentation(io.BytesIO(template.content_bytes)).slides

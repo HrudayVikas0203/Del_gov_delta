@@ -12,6 +12,15 @@ export default function MainLayout() {
   const { authToken, logout, setEmployees, setAccounts, setProjects, setAllocations, setSubmissions } = useStore();
 
   useEffect(() => {
+    const handleUnauthorized = () => {
+      logout();
+      navigate('/login', { replace: true });
+    };
+    window.addEventListener('deliverygov:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('deliverygov:unauthorized', handleUnauthorized);
+  }, [logout, navigate]);
+
+  useEffect(() => {
     async function loadData() {
       if (!authToken) return;
       try {
@@ -134,7 +143,7 @@ export default function MainLayout() {
       }
     }
     loadData();
-  }, [authToken, setEmployees, setAccounts, setProjects, setAllocations, setSubmissions]);
+  }, [authToken, logout, navigate, setEmployees, setAccounts, setProjects, setAllocations, setSubmissions]);
 
   return (
     <div className="flex min-h-screen bg-surface-alt">

@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { Building, Search, Globe, Shield, Coins, AlertCircle, Sparkles, Plus, X, Pencil } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import type { Account } from '../types';
-import { apiCreateAccount, apiDeleteAccountTemplate, apiUpdateAccount, apiUploadAccountTemplate } from '../services/api';
+import { apiCreateAccount, apiCreateAccountWithTemplate, apiDeleteAccountTemplate, apiUpdateAccount, apiUpdateAccountWithTemplate } from '../services/api';
 
 export default function Accounts() {
   const { accounts, projects, setAccounts, authToken } = useStore();
@@ -88,9 +88,13 @@ export default function Accounts() {
         contract_value: Number(newAccountData.contractValue) || 0,
       };
 
-      const saved = editingAccountId
-        ? await apiUpdateAccount(editingAccountId, payload, authToken)
-        : await apiCreateAccount(payload, authToken);
+      const saved = accountTemplateFile
+        ? editingAccountId
+          ? await apiUpdateAccountWithTemplate(editingAccountId, payload, accountTemplateFile, authToken)
+          : await apiCreateAccountWithTemplate(payload, accountTemplateFile, authToken)
+        : editingAccountId
+          ? await apiUpdateAccount(editingAccountId, payload, authToken)
+          : await apiCreateAccount(payload, authToken);
 
       const nextAccounts = editingAccountId
         ? accounts.map((account) => account.id === saved.id ? {
@@ -126,17 +130,7 @@ export default function Accounts() {
             }
           ];
 
-      if (accountTemplateFile) {
-        const template = await apiUploadAccountTemplate(saved.id, accountTemplateFile, authToken);
-        setAccounts(nextAccounts.map((account) => account.id === saved.id ? {
-          ...account,
-          pptTemplateId: template.id,
-          pptTemplateFilename: template.filename,
-          pptTemplateStatus: 'configured',
-        } : account));
-      } else {
-        setAccounts(nextAccounts);
-      }
+      setAccounts(nextAccounts);
 
       setIsAddingAccount(false);
       resetAccountForm();
@@ -415,7 +409,7 @@ export default function Accounts() {
                 </div>
 
                 <div className="space-y-2 border border-border rounded-xl p-3 bg-surface-alt/40">
-                  <label className="block text-xs font-semibold text-ink-soft uppercase tracking-wider">Account Template (PPTX/PDF)</label>
+                  <label className="block text-xs font-semibold text-ink-soft uppercase tracking-wider">Account PPT Template</label>
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -426,9 +420,22 @@ export default function Accounts() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".pptx,.pdf"
+                    accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     onChange={(e) => {
                       const file = e.target.files?.[0] ?? null;
+                      if (file && !file.name.toLowerCase().endsWith('.pptx')) {
+                        setAccountTemplateFile(null);
+                        setAccountTemplateStatus('Only .pptx account templates are supported.');
+                        e.target.value = '';
+                        return;
+                      }
+                      if (file && file.size > 12 * 1024 * 1024) {
+                        setAccountTemplateFile(null);
+                        setAccountTemplateStatus('The PPTX template exceeds the 12 MB size limit.');
+                        e.target.value = '';
+                        return;
+                      }
+                      setAccountTemplateStatus(null);
                       setAccountTemplateFile(file);
                     }}
                     className="hidden"

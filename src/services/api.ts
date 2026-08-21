@@ -1,22 +1,9 @@
-const RAW_API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV
-  ? 'http://127.0.0.1:8000'
-  : window.location.origin);
-const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
-const API_PATH_PREFIX = '/api/v1';
+import { buildApiUrl, isRetryableMethod, resolveApiBaseUrl, shouldClearAuthentication } from './apiConfig';
 
-// Diagnostic: Warn if API URL might not be optimal in production
-if (!import.meta.env.DEV && !import.meta.env.VITE_API_URL) {
-  console.warn(
-    'VITE_API_URL is not configured. API requests are using: ' + API_BASE_URL +
-    '\nFor production, consider setting VITE_API_URL to your backend URL directly.'
-  );
-}
+const API_BASE_URL = resolveApiBaseUrl(import.meta.env.VITE_API_URL, import.meta.env.DEV);
 
 function buildUrl(path: string) {
-  if (!path.startsWith('/')) {
-    path = `/${path}`;
-  }
-  return `${API_BASE_URL}${API_PATH_PREFIX}${path}`;
+  return buildApiUrl(API_BASE_URL, path);
 }
 
 function buildHeaders(token?: string, contentType?: string) {
@@ -48,6 +35,23 @@ async function fetchWithRetry(url: string, options: RequestInit, attempts = 3): 
   throw lastError;
 }
 
+function notifyUnauthorized() {
+  window.dispatchEvent(new CustomEvent('deliverygov:unauthorized'));
+}
+
+async function errorDetail(response: Response): Promise<string> {
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const content = await response.json();
+    return content?.detail ?? JSON.stringify(content);
+  }
+  if (contentType.includes('text/html')) {
+    return `API request failed with status ${response.status}. The upstream service returned HTML instead of JSON.`;
+  }
+  const text = await response.text();
+  return text.slice(0, 500) || response.statusText;
+}
+
 async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
   const url = buildUrl(path);
   const headers: HeadersInit = {
@@ -71,16 +75,15 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
 
   let response: Response;
   try {
-    response = await fetchWithRetry(url, requestOptions);
-  } catch (error) {
+    response = await fetchWithRetry(url, requestOptions, isRetryableMethod(options.method) ? 3 : 1);
+  } catch {
     throw new Error(`Unable to reach the backend at ${API_BASE_URL}. Check the API deployment or VITE_API_URL and try again.`);
   }
   const contentType = response.headers.get('content-type') || '';
 
   if (!response.ok) {
-    const errorContent = contentType.includes('application/json') ? await response.json() : await response.text();
-    const detail = typeof errorContent === 'string' ? errorContent : (errorContent?.detail ?? JSON.stringify(errorContent));
-    throw new Error(detail || response.statusText);
+    if (shouldClearAuthentication(response.status)) notifyUnauthorized();
+    throw new Error(await errorDetail(response));
   }
 
   if (response.status === 204) {
@@ -98,10 +101,8 @@ async function requestBlob(path: string, token?: string): Promise<Blob> {
   const url = buildUrl(path);
   const response = await fetchWithRetry(url, { method: 'GET', headers: buildHeaders(token) });
   if (!response.ok) {
-    const contentType = response.headers.get('content-type') || '';
-    const errorContent = contentType.includes('application/json') ? await response.json() : await response.text();
-    const detail = typeof errorContent === 'string' ? errorContent : (errorContent?.detail ?? JSON.stringify(errorContent));
-    throw new Error(detail || response.statusText);
+    if (shouldClearAuthentication(response.status)) notifyUnauthorized();
+    throw new Error(await errorDetail(response));
   }
   return response.blob();
 }
@@ -183,6 +184,20 @@ export async function apiUploadAccountTemplate(accountId: string, file: File, to
   const formData = new FormData();
   formData.append('file', file);
   return request<any>(`/governance/accounts/${accountId}/template`, { method: 'POST', body: formData }, token);
+}
+
+export async function apiCreateAccountWithTemplate(payload: unknown, file: File, token: string) {
+  const formData = new FormData();
+  formData.append('account_data', JSON.stringify(payload));
+  formData.append('file', file);
+  return request<any>('/governance/accounts/with-template', { method: 'POST', body: formData }, token);
+}
+
+export async function apiUpdateAccountWithTemplate(accountId: string, payload: unknown, file: File, token: string) {
+  const formData = new FormData();
+  formData.append('account_data', JSON.stringify(payload));
+  formData.append('file', file);
+  return request<any>(`/governance/accounts/${accountId}/with-template`, { method: 'PUT', body: formData }, token);
 }
 
 export async function apiDeleteAccountTemplate(accountId: string, token: string) {

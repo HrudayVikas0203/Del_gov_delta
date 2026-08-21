@@ -11,6 +11,12 @@ services:
         sync: false
       - key: SECRET_KEY
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash
+      - key: PPT_TEMPLATE_MAX_BYTES
+        value: "12582912"
       - key: BACKEND_CORS_ORIGINS
         value: https://del-gov-delta.vercel.app,https://del-gov-delta-k2zs.vercel.app,http://localhost:5173,http://127.0.0.1:5173
       - key: CORS_ORIGIN_REGEX

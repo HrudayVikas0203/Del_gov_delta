@@ -1,15 +1,11 @@
 from datetime import datetime, timezone
-from io import BytesIO
-from pathlib import Path
-import uuid
-
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from pptx import Presentation
 
-from app.core.security import get_current_user, require_min_role
 from app.core.config import get_settings
+from app.core.security import get_current_user, require_min_role
 from app.db.session import get_db
 from app.models.delivery import Account, Project, ResourceAllocation
 from app.models.people import Employee, Role
@@ -18,20 +14,19 @@ from app.rag.store import index_statuses
 from app.schemas.common import AccountCreate, AccountUpdate, AccountOut, AllocationCreate, AllocationOut, ProjectCreate, ProjectUpdate, ProjectOut, WeeklyStatusCreate, WeeklyStatusOut
 from app.services.allocation import create_allocation
 from app.services.audit import audit
+from app.services.template_storage import (
+    TemplateUploadError,
+    find_account_template,
+    remove_account_templates,
+    store_account_template,
+    validate_pptx_upload,
+)
 
 router = APIRouter(prefix="/governance", tags=["governance"])
 
 
 def _account_template(db: Session, account_id: str) -> ReportTemplate | None:
-    return db.scalar(
-        select(ReportTemplate)
-        .where(
-            ReportTemplate.account_id == account_id,
-            ReportTemplate.project_id.is_(None),
-            ReportTemplate.file_type == "pptx",
-        )
-        .order_by(ReportTemplate.uploaded_at.desc())
-    )
+    return find_account_template(db, account_id)
 
 
 def _account_response(db: Session, account: Account) -> Account:
@@ -40,6 +35,12 @@ def _account_response(db: Session, account: Account) -> Account:
     setattr(account, "ppt_template_filename", template.filename or template.name if template else None)
     setattr(account, "ppt_template_status", "configured" if template else "not_configured")
     return account
+
+
+def _validated_uploaded_template(file: UploadFile):
+    max_bytes = get_settings().ppt_template_max_bytes
+    content = file.file.read(max_bytes + 1)
+    return validate_pptx_upload(file.filename, file.content_type, content)
 
 
 @router.get("/employees", response_model=list[dict])
@@ -73,6 +74,35 @@ def create_account(payload: AccountCreate, db: Session = Depends(get_db), actor:
     return _account_response(db, account)
 
 
+@router.post("/accounts/with-template", response_model=AccountOut, status_code=201)
+def create_account_with_template(
+    account_data: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    actor: Employee = Depends(require_min_role(Role.PROJECT_MANAGER)),
+) -> Account:
+    try:
+        payload = AccountCreate.model_validate_json(account_data)
+        validated = _validated_uploaded_template(file)
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Account details are invalid") from exc
+    except TemplateUploadError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    try:
+        account = Account(**payload.model_dump())
+        db.add(account)
+        db.flush()
+        store_account_template(db, account.id, validated, actor.id)
+        audit(db, actor.id, "Account Created", "Accounts", f"Account {account.name} created with PPT template")
+        db.commit()
+        db.refresh(account)
+        return _account_response(db, account)
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.get("/accounts", response_model=list[AccountOut])
 def list_accounts(db: Session = Depends(get_db), _: Employee = Depends(get_current_user)) -> list[Account]:
     return [_account_response(db, account) for account in db.scalars(select(Account).order_by(Account.name)).all()]
@@ -99,6 +129,38 @@ def update_account(account_id: str, payload: AccountUpdate, db: Session = Depend
     return _account_response(db, account)
 
 
+@router.put("/accounts/{account_id}/with-template", response_model=AccountOut)
+def update_account_with_template(
+    account_id: str,
+    account_data: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    actor: Employee = Depends(require_min_role(Role.PROJECT_MANAGER)),
+) -> Account:
+    account = db.get(Account, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    try:
+        payload = AccountUpdate.model_validate_json(account_data)
+        validated = _validated_uploaded_template(file)
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Account details are invalid") from exc
+    except TemplateUploadError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    try:
+        for key, value in payload.model_dump(exclude_unset=True).items():
+            setattr(account, key, value)
+        store_account_template(db, account_id, validated, actor.id)
+        audit(db, actor.id, "Account Updated", "Accounts", f"Account {account.name} and PPT template updated")
+        db.commit()
+        db.refresh(account)
+        return _account_response(db, account)
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.post("/accounts/{account_id}/template", response_model=dict, status_code=201)
 def upload_account_template(
     account_id: str,
@@ -109,37 +171,15 @@ def upload_account_template(
     account = db.get(Account, account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    if Path(file.filename or "").suffix.lower() != ".pptx":
-        raise HTTPException(status_code=400, detail="Only .pptx account templates are supported")
-
-    settings = get_settings()
-    content = file.file.read()
     try:
-        Presentation(BytesIO(content))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="The uploaded PPTX template is corrupt or unreadable") from exc
-
-    existing = _account_template(db, account_id)
-    if existing:
-        old_path = Path(existing.file_path)
-        if old_path.exists():
-            old_path.unlink()
-        template = existing
-    else:
-        template = ReportTemplate(name=Path(file.filename).stem, file_type="pptx", account_id=account_id)
-        db.add(template)
-
-    saved_path = settings.templates_dir / f"account_{account_id}_{uuid.uuid4()}.pptx"
-    saved_path.write_bytes(content)
-    template.name = Path(file.filename).stem
-    template.filename = file.filename
-    template.file_path = str(saved_path)
-    template.file_type = "pptx"
-    template.content_type = file.content_type
-    template.size_bytes = len(content)
-    template.content_bytes = content
-    template.uploaded_by_id = actor.id
-    template.project_id = None
+        validated = _validated_uploaded_template(file)
+        template = store_account_template(db, account_id, validated, actor.id)
+    except TemplateUploadError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
     audit(db, actor.id, "Account Template Updated", "Accounts", f"PPT template updated for account {account.name}")
     db.commit()
     db.refresh(template)
@@ -151,14 +191,10 @@ def delete_account_template(account_id: str, db: Session = Depends(get_db), acto
     account = db.get(Account, account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    template = _account_template(db, account_id)
-    if not template:
+    templates = remove_account_templates(db, account_id)
+    if not templates:
         raise HTTPException(status_code=404, detail="No PPT template configured for this account")
-    path = Path(template.file_path)
-    if path.exists():
-        path.unlink()
     audit(db, actor.id, "Account Template Removed", "Accounts", f"PPT template removed for account {account.name}")
-    db.delete(template)
     db.commit()
     return None
 

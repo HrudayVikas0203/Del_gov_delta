@@ -99,6 +99,7 @@ class Settings(BaseSettings):
 
     report_output_dir: str = "backend/storage/reports"
     report_templates_dir: str = "backend/storage/report_templates"
+    ppt_template_max_bytes: int = 12 * 1024 * 1024
 
     seed_demo_data: bool = True
 

@@ -40,7 +40,9 @@ Start command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Health check: /health
 ```
 
-Set `DATABASE_URL`, `SECRET_KEY`, `BACKEND_CORS_ORIGINS`, and `CORS_ORIGIN_REGEX` in Render. The production frontend should set `VITE_API_URL=https://del-gov-delta.onrender.com` (or use the repository Vercel rewrite). Keep `SMTP_USER` and `SMTP_PASSWORD` configured only on Render; never add them to frontend environment variables.
+Set `DATABASE_URL`, `SECRET_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `BACKEND_CORS_ORIGINS`, and `CORS_ORIGIN_REGEX` in Render. In the Vercel project settings, set the public build variable `VITE_API_URL=https://del-gov-delta.onrender.com` for Production and Preview, then redeploy. The frontend intentionally refuses to use its own Vercel origin as an implicit production API. Keep API keys, database credentials, `SMTP_USER`, and `SMTP_PASSWORD` only on Render; never add secrets to `VITE_*` variables.
+
+Account PPT templates are validated and stored as database BLOBs. `report_templates.file_path` remains only as backward-compatible metadata and is not used to retrieve account templates. Startup schema upgrades add the BLOB metadata columns idempotently and never drop or reset existing data. Existing legacy rows without `content_bytes` remain intact but must be replaced through the account template UI before report generation.
 
 Verify the deployment with:
 
@@ -62,6 +64,8 @@ celery -A app.workers.celery_app.celery_app worker --loglevel=info --pool=solo
 
 `GET /api/v1/ai/providers` returns every supported provider plus `configured=true/false`.
 Only providers with API keys in `.env` can be used. If no provider is selected, AI and RAG generation return a controlled error.
+
+PPT mapping always uses the configured Gemini environment (`GEMINI_API_KEY` and `GEMINI_MODEL`). Other providers, including Groq, remain available for ordinary narrative, RAG, and content generation. Gemini returns a structured mapping of server-owned report fields to existing template element IDs; it does not provide report facts or redesign slides.
 
 ## RBAC Model
 

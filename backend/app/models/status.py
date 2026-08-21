@@ -2,7 +2,8 @@ import enum
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, String, Text, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, LargeBinary, String, Text, func
+from sqlalchemy.dialects.mysql import LONGBLOB, MEDIUMBLOB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
@@ -73,6 +74,10 @@ class GeneratedReport(Base):
     scope: Mapped[str] = mapped_column(String(220), nullable=False)
     template_id: Mapped[str | None] = mapped_column(ForeignKey("report_templates.id", ondelete="SET NULL"), nullable=True)
     file_path: Mapped[str | None] = mapped_column(String(500))
+    filename: Mapped[str | None] = mapped_column(String(255))
+    content_type: Mapped[str | None] = mapped_column(String(120))
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    content_bytes: Mapped[bytes | None] = mapped_column(LargeBinary().with_variant(LONGBLOB, "mysql"))
     status: Mapped[str] = mapped_column(String(40), nullable=False, default="generating")
     generated_by_id: Mapped[str | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"))
     llm_provider: Mapped[str | None] = mapped_column(String(40))
@@ -92,11 +97,14 @@ class ReportTemplate(Base):
     filename: Mapped[str | None] = mapped_column(String(255))
     content_type: Mapped[str | None] = mapped_column(String(120))
     size_bytes: Mapped[int | None] = mapped_column(Integer)
-    content_bytes: Mapped[bytes | None] = mapped_column(LargeBinary)
+    content_bytes: Mapped[bytes | None] = mapped_column(LargeBinary().with_variant(MEDIUMBLOB, "mysql"))
+    content_sha256: Mapped[str | None] = mapped_column(String(64))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     account_id: Mapped[str | None] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     uploaded_by_id: Mapped[str | None] = mapped_column(ForeignKey("employees.id", ondelete="SET NULL"), nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class AuditLog(Base):

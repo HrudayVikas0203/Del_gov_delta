@@ -85,6 +85,42 @@ def test_auth_me_with_invalid_token() -> None:
     assert "Invalid token" in response.json()["detail"]
 
 
+def test_auth_me_with_expired_token() -> None:
+    """Expired JWTs are rejected so the frontend can clear stale sessions."""
+    from datetime import datetime, timedelta, timezone
+
+    import jwt
+
+    from app.core.config import get_settings
+
+    client = TestClient(app)
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "praveen.baburaya@delta.com", "password": "Demo@123"},
+    )
+    subject = jwt.decode(
+        login_response.json()["access_token"],
+        options={"verify_signature": False},
+    )["sub"]
+    settings = get_settings()
+    expired_token = jwt.encode(
+        {
+            "sub": subject,
+            "role": "DELIVERY_HEAD",
+            "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+        },
+        settings.secret_key,
+        algorithm="HS256",
+    )
+
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {expired_token}"},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid token"
+
+
 def test_protected_endpoint_without_token() -> None:
     """Test that protected endpoints without token return 401 or 403."""
     client = TestClient(app)

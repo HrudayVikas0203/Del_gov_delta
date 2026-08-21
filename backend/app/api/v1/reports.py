@@ -1,11 +1,13 @@
 ﻿from pathlib import Path
 import logging
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, Response
 
+from app.ai.ppt_mapping import GeminiMappingConfigurationError, GeminiMappingError
 from app.core.security import get_current_user, require_min_role
 from app.db.session import get_db
 from app.models.delivery import Project
@@ -14,6 +16,12 @@ from app.models.status import GeneratedReport, ReportFormat, ReportTemplate
 from app.reports.generator import generate_report_file
 from app.schemas.common import ReportCreate, ReportOut
 from app.services.audit import audit
+from app.services.template_storage import (
+    InvalidTemplateError,
+    TemplateNotConfiguredError,
+    TemplateStorageError,
+    find_account_template,
+)
 from app.workers.tasks import generate_report_task
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -34,17 +42,10 @@ def _match_report_template(db: Session, payload: ReportCreate) -> ReportTemplate
         account_id = project.account_id
 
     if account_id and requested_type == ReportFormat.PPTX.value:
-        account_template = db.scalar(
-            select(ReportTemplate)
-            .where(
-                ReportTemplate.account_id == account_id,
-                ReportTemplate.project_id.is_(None),
-                ReportTemplate.file_type == requested_type,
-            )
-            .order_by(ReportTemplate.uploaded_at.desc())
-        )
-        if account_template:
-            return account_template
+        return find_account_template(db, account_id)
+
+    if requested_type == ReportFormat.PPTX.value:
+        return None
 
     if project_id:
         project_template = db.scalar(
@@ -111,8 +112,23 @@ def create_report(payload: ReportCreate, db: Session = Depends(get_db), actor: E
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected template belongs to a different project")
         if effective_account_id and template.account_id and template.account_id != effective_account_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected template belongs to a different account")
+        if payload.report_format == ReportFormat.PPTX and (
+            not effective_account_id
+            or template.account_id != effective_account_id
+            or template.project_id is not None
+            or not template.is_active
+        ):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected PPT template does not belong to the report account")
     else:
         template = _match_report_template(db, payload.model_copy(update={"account_id": effective_account_id}))
+
+    if payload.report_format == ReportFormat.PPTX:
+        if not effective_account_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select one account before generating a PPT report")
+        if template is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account PPT template is not configured.")
+        if not template.content_bytes:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Unable to retrieve the account PPT template.")
 
     report = GeneratedReport(
         title=payload.title,
@@ -134,12 +150,29 @@ def create_report(payload: ReportCreate, db: Session = Depends(get_db), actor: E
         try:
             generate_report_file(db, report.id, payload.llm)
         except Exception as exc:
-            logger.exception("Report generation failed for report %s", report.id)
             report.status = "failed"
             db.commit()
+            if isinstance(exc, TemplateNotConfiguredError):
+                detail = exc.client_message
+                response_status = status.HTTP_400_BAD_REQUEST
+            elif isinstance(exc, InvalidTemplateError):
+                detail = exc.client_message
+                response_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+            elif isinstance(exc, TemplateStorageError):
+                detail = exc.client_message
+                response_status = status.HTTP_500_INTERNAL_SERVER_ERROR
+            elif isinstance(exc, GeminiMappingConfigurationError):
+                detail = "Gemini PPT mapping is not configured."
+                response_status = status.HTTP_400_BAD_REQUEST
+            elif isinstance(exc, GeminiMappingError):
+                detail = "Gemini PPT mapping failed. Please check the AI provider configuration."
+                response_status = status.HTTP_502_BAD_GATEWAY
+            else:
+                detail = "Unable to generate the report."
+                response_status = status.HTTP_500_INTERNAL_SERVER_ERROR
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Report generation failed. Check the configured AI provider and server diagnostics.",
+                status_code=response_status,
+                detail=detail,
             ) from exc
         db.refresh(report)
     return report
@@ -153,10 +186,19 @@ def list_reports(db: Session = Depends(get_db), _: Employee = Depends(get_curren
 
 
 @router.get("/{report_id}/download")
-def download_report(report_id: str, db: Session = Depends(get_db), _: Employee = Depends(get_current_user)) -> FileResponse:
+def download_report(report_id: str, db: Session = Depends(get_db), _: Employee = Depends(get_current_user)) -> Response:
     report = db.get(GeneratedReport, report_id)
-    if report is None or not report.file_path:
+    if report is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    if report.content_bytes:
+        filename = report.filename or f"{report.id}.{report.report_format.value}"
+        return Response(
+            content=bytes(report.content_bytes),
+            media_type=report.content_type or "application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+        )
+    if not report.file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report file not found")
     report_path = Path(report.file_path)
     if not report_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report file not found")

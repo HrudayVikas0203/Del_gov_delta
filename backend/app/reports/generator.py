@@ -1,7 +1,8 @@
 ﻿import json
-from contextlib import nullcontext
+import logging
 from pathlib import Path
 from textwrap import shorten
+import time
 
 from openpyxl import Workbook
 from pptx import Presentation
@@ -22,7 +23,7 @@ from app.models.delivery import Account, Project
 from app.models.people import Employee
 from app.models.status import GeneratedReport, ReportFormat, WeeklyStatus
 from app.schemas.common import LLMSelection
-from app.services.template_storage import get_account_template_file
+from app.services.template_storage import TemplateNotConfiguredError, get_account_template_file
 
 
 BRAND_BLUE = "#1D4ED8"
@@ -33,6 +34,7 @@ WARNING = "#D97706"
 DANGER = "#DC2626"
 LIGHT_BLUE = "#EFF6FF"
 BORDER_BLUE = "#BFDBFE"
+logger = logging.getLogger(__name__)
 
 
 class ReportNarrative(BaseModel):
@@ -287,45 +289,45 @@ def _populate_template(prs: Presentation, values: dict[str, str], mapping=None) 
     replaced = False
 
     def replace_text(text: str) -> str:
-        nonlocal replaced
         updated = text
         for key, value in values.items():
-            for token in (f"{{{{{key}}}}}", f"[{key}]", key):
+            for token in (f"{{{{{key}}}}}", f"[{key}]"):
                 if token in updated:
                     updated = updated.replace(token, value)
-                    replaced = True
         return updated
 
-    def set_shape_text(shape, text: str) -> None:
+    def set_text_frame(text_frame, text: str) -> None:
         nonlocal replaced
-        if text == getattr(shape, "text", ""):
+        if text == text_frame.text:
             return
-        if getattr(shape, "has_text_frame", False):
-            paragraphs = shape.text_frame.paragraphs
-            if len(paragraphs) == 1 and len(paragraphs[0].runs) == 1:
-                paragraphs[0].runs[0].text = text
-            else:
-                shape.text = text
-            replaced = True
-
-    def set_cell_text(cell, text: str) -> None:
-        nonlocal replaced
-        if text == cell.text:
-            return
-        paragraphs = cell.text_frame.paragraphs
-        if len(paragraphs) == 1 and len(paragraphs[0].runs) == 1:
-            paragraphs[0].runs[0].text = text
+        paragraphs = text_frame.paragraphs
+        first_paragraph = paragraphs[0]
+        if first_paragraph.runs:
+            first_paragraph.runs[0].text = text
+            for run in first_paragraph.runs[1:]:
+                run.text = ""
         else:
-            cell.text = text
+            first_paragraph.add_run().text = text
+        for paragraph in paragraphs[1:]:
+            for run in paragraph.runs:
+                run.text = ""
         replaced = True
 
-    def mapped_text(fields: dict) -> str:
+    def replace_frame_tokens(text_frame) -> None:
+        nonlocal replaced
+        for paragraph in text_frame.paragraphs:
+            for run in paragraph.runs:
+                updated = replace_text(run.text)
+                if updated != run.text:
+                    run.text = updated
+                    replaced = True
+
+    def mapped_text(fields: list[str]) -> str:
         parts = []
-        for key, value in fields.items():
-            if value is None:
-                continue
-            source_value = values.get(key, value)
-            parts.append("\n".join(str(item) for item in source_value) if isinstance(source_value, list) else str(source_value))
+        for key in fields:
+            source_value = values.get(key)
+            if source_value is not None:
+                parts.append(str(source_value))
         return "\n".join(parts)
 
     mapped_elements = {}
@@ -336,18 +338,19 @@ def _populate_template(prs: Presentation, values: dict[str, str], mapping=None) 
     for slide_index, slide in enumerate(prs.slides):
         for shape_index, shape in enumerate(slide.shapes):
             element_id = f"slide_{slide_index}_shape_{shape_index}"
-            if element_id in mapped_elements:
-                set_shape_text(shape, mapped_elements[element_id])
             if getattr(shape, "has_text_frame", False):
-                updated = replace_text(shape.text)
-                if updated != shape.text:
-                    set_shape_text(shape, updated)
+                if element_id in mapped_elements:
+                    set_text_frame(shape.text_frame, mapped_elements[element_id])
+                else:
+                    replace_frame_tokens(shape.text_frame)
             if getattr(shape, "has_table", False):
-                for row in shape.table.rows:
-                    for cell in row.cells:
-                        updated = replace_text(cell.text)
-                        if updated != cell.text:
-                            set_cell_text(cell, updated)
+                for row_index, row in enumerate(shape.table.rows):
+                    for cell_index, cell in enumerate(row.cells):
+                        cell_id = f"{element_id}_cell_{row_index}_{cell_index}"
+                        if cell_id in mapped_elements:
+                            set_text_frame(cell.text_frame, mapped_elements[cell_id])
+                        else:
+                            replace_frame_tokens(cell.text_frame)
     return replaced
 
 
@@ -358,145 +361,118 @@ def generate_report_file(db: Session, report_id: str, llm: LLMSelection | None =
     projects = _project_rows(db, report)
     statuses = _status_rows(db, report, projects)
     path = _report_path(report)
-    if report.report_format == ReportFormat.PPTX:
-        account_id = _scope_value(report.scope, "account")
-        account_template = (
-            report.template
-            if account_id
-            and getattr(report, "template", None)
-            and report.template.account_id == account_id
-            and report.template.project_id is None
-            and report.template.file_type == "pptx"
-            else None
+    account_id = _scope_value(report.scope, "account")
+    project_ids = [project.id for project in projects]
+    report_started = time.perf_counter()
+    stage = "report_generation"
+    logger.info("REPORT_GENERATION_BEGIN report_id=%s account_id=%s project_ids=%s stage=%s elapsed_ms=0", report.id, account_id, project_ids, stage)
+    try:
+        if report.report_format == ReportFormat.PPTX:
+            account_template = (
+                report.template
+                if account_id
+                and getattr(report, "template", None)
+                and report.template.account_id == account_id
+                and report.template.project_id is None
+                and report.template.file_type == "pptx"
+                and report.template.is_active
+                else None
+            )
+            if not account_id or account_template is None:
+                raise TemplateNotConfiguredError()
+            stage = "template_lookup"
+            stage_started = time.perf_counter()
+            logger.info("TEMPLATE_LOOKUP_BEGIN report_id=%s account_id=%s project_ids=%s stage=%s elapsed_ms=0", report.id, account_id, project_ids, stage)
+            with get_account_template_file(db, account_id, account_template.id) as template_path:
+                logger.info("TEMPLATE_LOOKUP_END report_id=%s account_id=%s project_ids=%s stage=%s elapsed_ms=%d", report.id, account_id, project_ids, stage, round((time.perf_counter() - stage_started) * 1000))
+                _generate_ppt(path, report, projects, statuses, db, llm, template_path, account_id)
+        elif report.report_format == ReportFormat.PDF:
+            _generate_pdf(path, report, projects, statuses, db, llm)
+        else:
+            _generate_xlsx(path, report, projects, statuses, db)
+
+        content = path.read_bytes()
+        content_types = {
+            ReportFormat.PPTX: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ReportFormat.PDF: "application/pdf",
+            ReportFormat.XLSX: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }
+        report.file_path = str(path)
+        report.filename = path.name
+        report.content_type = content_types[report.report_format]
+        report.size_bytes = len(content)
+        report.content_bytes = content
+        report.status = "ready"
+        db.commit()
+        logger.info("REPORT_GENERATION_END report_id=%s account_id=%s project_ids=%s stage=report_generation elapsed_ms=%d", report.id, account_id, project_ids, round((time.perf_counter() - report_started) * 1000))
+        return str(path)
+    except Exception as exc:
+        logger.exception(
+            "REPORT_GENERATION_FAILED report_id=%s account_id=%s project_ids=%s stage=%s exception_type=%s elapsed_ms=%d",
+            report.id,
+            account_id,
+            project_ids,
+            stage,
+            type(exc).__name__,
+            round((time.perf_counter() - report_started) * 1000),
         )
-        template_context = (
-            get_account_template_file(db, account_id, account_template.id)
-            if account_template
-            else nullcontext(None)
-        )
-        with template_context as template_path:
-            _generate_ppt(path, report, projects, statuses, db, llm, template_path)
-    elif report.report_format == ReportFormat.PDF:
-        _generate_pdf(path, report, projects, statuses, db, llm)
-    else:
-        _generate_xlsx(path, report, projects, statuses, db)
-    report.file_path = str(path)
-    report.status = "ready"
-    db.commit()
-    return str(path)
+        raise
 
 
-def _generate_ppt(path: Path, report: GeneratedReport, projects: list[Project], statuses: list[WeeklyStatus], db: Session, llm: LLMSelection | None = None, template_path: Path | None = None) -> None:
-    base_template = template_path
-    prs = Presentation(str(base_template)) if base_template else Presentation()
+def _generate_ppt(
+    path: Path,
+    report: GeneratedReport,
+    projects: list[Project],
+    statuses: list[WeeklyStatus],
+    db: Session,
+    llm: LLMSelection | None = None,
+    template_path: Path | None = None,
+    account_id: str | None = None,
+) -> None:
+    if template_path is None:
+        raise TemplateNotConfiguredError()
 
-    if len(prs.slides) == 0:
-        title = prs.slides.add_slide(prs.slide_layouts[0])
-        _set_slide_title(title, report.title)
-        if len(title.placeholders) > 1:
-            title.placeholders[1].text = "AI-assisted delivery governance report"
+    project_ids = [project.id for project in projects]
+    validation_started = time.perf_counter()
+    logger.info("TEMPLATE_VALIDATION_BEGIN report_id=%s account_id=%s project_ids=%s stage=template_validation elapsed_ms=0", report.id, account_id, project_ids)
+    try:
+        prs = Presentation(str(template_path))
+    except Exception as exc:
+        from app.services.template_storage import InvalidTemplateError
 
-    metrics = _metrics(statuses, projects)
+        raise InvalidTemplateError() from exc
+    if not prs.slides:
+        from app.services.template_storage import InvalidTemplateError
+
+        raise InvalidTemplateError()
+    original_slide_count = len(prs.slides)
+    logger.info("TEMPLATE_VALIDATION_END report_id=%s account_id=%s project_ids=%s stage=template_validation elapsed_ms=%d", report.id, account_id, project_ids, round((time.perf_counter() - validation_started) * 1000))
+
     summary_text = _llm_summary(report, projects, statuses, llm)
     values = _template_values(report, projects, statuses, db, summary_text)
-    if llm and llm.provider == "gemini" and base_template:
-        _, mapping = map_template(base_template, db, projects, statuses)
-        for slide in mapping.slides:
-            for key, value in slide.fields.items():
-                if key in values:
-                    continue
-                if isinstance(value, list):
-                    values[key] = "\n".join(str(item) for item in value)
-                elif value is not None:
-                    values[key] = str(value)
-        if mapping.slides:
-            executive = next((slide.fields.get("EXECUTIVE_SUMMARY") for slide in mapping.slides if slide.fields.get("EXECUTIVE_SUMMARY")), None)
-            if executive:
-                summary_text = str(executive)
-                values["EXECUTIVE_SUMMARY"] = summary_text
-    _populate_template(prs, values, mapping if llm and llm.provider == "gemini" and base_template else None)
 
-    summary = prs.slides.add_slide(prs.slide_layouts[5] if len(prs.slide_layouts) > 5 else prs.slide_layouts[0])
-    _set_slide_title(summary, "Executive Delivery Summary")
-    _add_textbox(summary, summary_text, 0.65, 1.05, 8.9, 1.45, size=14, color=BRAND_NAVY)
-    _add_textbox(summary, f"Scope: {report.scope}", 0.65, 0.75, 8.7, 0.25, size=10, bold=True, color=BRAND_BLUE)
-    action_lines = []
-    for status in (metrics["blockers"] or statuses[:3])[:3]:
-        action_lines.append(f"- {_short(status.fields.get('supportRequired') or status.fields.get('nextWeekPlan'), 120, 'Track next delivery milestone')}")
-    _add_textbox(summary, "Leadership Actions\n" + "\n".join(action_lines or ["- Continue weekly governance reviews and approval follow-up."]), 0.75, 2.85, 8.4, 1.35, size=12, color=INK_SOFT)
+    mapping_started = time.perf_counter()
+    logger.info("GEMINI_MAPPING_BEGIN report_id=%s account_id=%s project_ids=%s stage=gemini_mapping elapsed_ms=0", report.id, account_id, project_ids)
+    _, mapping = map_template(
+        template_path,
+        db,
+        projects,
+        statuses,
+        {"id": report.id, "title": report.title, "type": report.report_type.value, "scope": report.scope},
+    )
+    logger.info("GEMINI_MAPPING_END report_id=%s account_id=%s project_ids=%s stage=gemini_mapping elapsed_ms=%d", report.id, account_id, project_ids, round((time.perf_counter() - mapping_started) * 1000))
 
-    dashboard = prs.slides.add_slide(prs.slide_layouts[5] if len(prs.slide_layouts) > 5 else prs.slide_layouts[0])
-    _set_slide_title(dashboard, "Delivery Status Dashboard")
-    cards = [
-        ("Projects", metrics["project_count"], BRAND_BLUE),
-        ("Updates", metrics["status_count"], BRAND_BLUE),
-        ("Approved", metrics["approved_count"], SUCCESS),
-        ("Blocked", metrics["blocker_count"], DANGER if metrics["blocker_count"] else SUCCESS),
-        ("Avg Complete", f"{metrics['avg_completion']}%", WARNING if metrics["avg_completion"] < 70 else SUCCESS),
-    ]
-    for idx, (label, value, accent) in enumerate(cards):
-        _add_metric_card(dashboard, label, value, 0.45 + idx * 1.88, 1.0, accent=accent)
-
-    _add_textbox(dashboard, "Health Distribution", 0.7, 2.25, 2.5, 0.3, size=13, bold=True, color=BRAND_NAVY)
-    max_count = max(metrics["health_counts"].values()) if metrics["health_counts"] else 1
-    for idx, (health, count) in enumerate(metrics["health_counts"].items()):
-        y = 2.75 + idx * 0.48
-        _add_textbox(dashboard, health, 0.75, y, 0.85, 0.22, size=9, bold=True)
-        width = 0.35 + (count / max(max_count, 1)) * 3.8
-        color = {"Green": SUCCESS, "Amber": WARNING, "Red": DANGER}[health]
-        bar = dashboard.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(1.55), Inches(y), Inches(width), Inches(0.22))
-        bar.fill.solid()
-        bar.fill.fore_color.rgb = _rgb(color)
-        bar.line.color.rgb = _rgb(color)
-        _add_textbox(dashboard, str(count), 5.5, y, 0.45, 0.22, size=9, bold=True)
-    _add_textbox(dashboard, "Interpretation\nGreen indicates on-track execution. Amber requires management follow-up. Red or blocker-backed items should be treated as escalation candidates for the next governance review.", 6.25, 2.35, 3.0, 1.6, size=11)
-
-    table_slide = prs.slides.add_slide(prs.slide_layouts[5] if len(prs.slide_layouts) > 5 else prs.slide_layouts[0])
-    _set_slide_title(table_slide, "Team Status Detail")
-    rows = max(min(len(statuses), 8) + 1, 2)
-    table = table_slide.shapes.add_table(rows, 6, Inches(0.25), Inches(1.05), Inches(9.5), Inches(4.9)).table
-    headers = ["Person", "Project", "Cycle", "Health", "Complete", "Key Update"]
-    for idx, header in enumerate(headers):
-        cell = table.cell(0, idx)
-        cell.text = header
-        cell.fill.solid()
-        cell.fill.fore_color.rgb = _rgb(BRAND_NAVY)
-        cell.text_frame.paragraphs[0].font.color.rgb = _rgb("#FFFFFF")
-        cell.text_frame.paragraphs[0].font.bold = True
-        cell.text_frame.paragraphs[0].font.size = Pt(9)
-    for row_idx, status in enumerate(statuses[:8], start=1):
-        employee = db.get(Employee, status.employee_id)
-        project = db.get(Project, status.project_id) if status.project_id else None
-        values = [
-            employee.name if employee else "-",
-            project.name if project else _short(status.fields.get("project"), 24, "-"),
-            f"{_text(status.fields.get('reportingFrequency') or status.fields.get('frequency'), 'Weekly')} / {status.week_start.strftime('%d %b %Y')}",
-            _text(status.fields.get("overallStatus"), status.status.value),
-            f"{status.fields.get('completionPercent') or 0}%",
-            _short(status.fields.get("achievements"), 90, "No narrative submitted"),
-        ]
-        for col_idx, value in enumerate(values):
-            cell = table.cell(row_idx, col_idx)
-            cell.text = str(value)
-            for paragraph in cell.text_frame.paragraphs:
-                paragraph.font.size = Pt(8)
-                paragraph.font.color.rgb = _rgb(BRAND_NAVY if col_idx == 0 else INK_SOFT)
-
-    risk_slide = prs.slides.add_slide(prs.slide_layouts[5] if len(prs.slide_layouts) > 5 else prs.slide_layouts[0])
-    _set_slide_title(risk_slide, "Risks, Decisions, Next Actions")
-    risk_items = metrics["blockers"] or statuses[:5]
-    y = 1.05
-    for status in risk_items[:5]:
-        project_name = _text(status.fields.get("project"), "Project")
-        risk = _short(status.fields.get("risks") or status.fields.get("blockers"), 120, "No major risk reported")
-        action = _short(status.fields.get("supportRequired") or status.fields.get("nextWeekPlan"), 120, "Continue tracking next milestone")
-        _add_textbox(risk_slide, project_name, 0.65, y, 2.1, 0.25, size=10, bold=True, color=BRAND_BLUE)
-        _add_textbox(risk_slide, f"Risk: {risk}\nAction: {action}", 2.75, y, 6.7, 0.55, size=10, color=INK_SOFT)
-        y += 0.75
-    if not risk_items:
-        _add_textbox(risk_slide, "No submitted risks or blockers are available for this scope.", 0.65, 1.2, 8.7, 0.45, size=13)
-
+    population_started = time.perf_counter()
+    logger.info("PPT_POPULATION_BEGIN report_id=%s account_id=%s project_ids=%s stage=ppt_population elapsed_ms=0", report.id, account_id, project_ids)
+    _populate_template(prs, values, mapping)
     prs.save(path)
+    try:
+        generated = Presentation(str(path))
+    except Exception as exc:
+        raise RuntimeError("Generated PPT could not be reopened.") from exc
+    if len(generated.slides) != original_slide_count:
+        raise RuntimeError("Generated PPT changed the uploaded template slide structure.")
+    logger.info("PPT_POPULATION_END report_id=%s account_id=%s project_ids=%s stage=ppt_population elapsed_ms=%d", report.id, account_id, project_ids, round((time.perf_counter() - population_started) * 1000))
 
 
 def _generate_pdf(path: Path, report: GeneratedReport, projects: list[Project], statuses: list[WeeklyStatus], db: Session, llm: LLMSelection | None = None) -> None:

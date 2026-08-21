@@ -165,6 +165,9 @@ export default function Reports() {
   const roleFilteredReportEmployees = manageableEmployees.filter((employee) => selectedReportRoleGroup.employeeRoles.includes(employee.roleCategory));
   const selectedProject = projects.find((item) => item.id === selectedProjectId);
   const selectedEmployee = employees.find((item) => item.id === selectedEmployeeId);
+  const selectedAccount = selectedProject
+    ? accounts.find((account) => account.id === selectedProject.accountId)
+    : accounts.find((account) => account.name === selectedScopeAccount);
 
   const handleGenerate = async (template: typeof reportTemplates[number]) => {
     if (!authToken) {
@@ -188,11 +191,24 @@ export default function Reports() {
       return;
     }
 
+    if (template.format === 'PPT' && !selectedAccount) {
+      setLoadError('Select one account before generating a PPT report.');
+      return;
+    }
+    if (template.format === 'PPT' && selectedAccount?.pptTemplateStatus !== 'configured') {
+      setLoadError('Account PPT template is not configured.');
+      return;
+    }
+    const geminiProvider = providers.find((provider) => provider.name === 'gemini' && provider.configured);
+    if (template.format === 'PPT' && !geminiProvider) {
+      setLoadError('Gemini PPT mapping is not configured.');
+      return;
+    }
+
     const key = template.label;
     setGenerating(key);
     setLoadError(null);
 
-    const account = accounts.find((acc) => acc.name === selectedScopeAccount);
     const finalScope =
       reportScopeMode === 'project' && selectedProject
         ? `Project Rollup: ${selectedProject.name}`
@@ -224,18 +240,16 @@ export default function Reports() {
 
     const requestedFormat = formatMap[template.format];
     const payload = {
-      title: `${template.label}${titleSuffix} â€” ${new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`,
+      title: `${template.label}${titleSuffix} — ${new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`,
       report_type: reportTypeMap[template.type] || 'executive_summary',
       report_format: requestedFormat,
       scope: finalScope,
-      account_id: reportScopeMode === 'portfolio' ? account?.id : undefined,
+      account_id: selectedAccount?.id,
       project_id: (reportScopeMode === 'project' || reportScopeMode === 'individual') ? selectedProjectId : undefined,
       employee_id: reportScopeMode === 'individual' ? selectedEmployeeId : undefined,
       status_frequency: statusFrequency === 'all' ? undefined : statusFrequency,
       llm: (() => {
-        const pptProvider = template.format === 'PPT'
-          ? providers.find((provider) => provider.name === 'gemini' && provider.configured)
-          : undefined;
+        const pptProvider = template.format === 'PPT' ? geminiProvider : undefined;
         const provider = pptProvider ?? currentProvider;
         return provider?.configured ? { provider: provider.name, model: provider.default_model } : undefined;
       })(),
@@ -463,13 +477,13 @@ export default function Reports() {
             <div className="space-y-3">
               <h3 className="text-sm font-semibold text-ink">Account PPT template</h3>
               <p className="text-xs text-ink-soft">Project reports automatically use the selected account's stored template.</p>
-              {selectedScopeAccount === 'All Accounts' ? (
+              {!selectedAccount ? (
                 <p className="text-xs text-ink-faint">Select an account to see its template configuration.</p>
               ) : (
                 <div className="rounded-lg border border-border bg-surface-alt/40 px-3 py-2 text-xs">
-                  {accounts.find((account) => account.name === selectedScopeAccount)?.pptTemplateStatus === 'configured' ? (
+                  {selectedAccount.pptTemplateStatus === 'configured' ? (
                     <span className="text-success font-semibold">
-                      Configured: {accounts.find((account) => account.name === selectedScopeAccount)?.pptTemplateFilename}
+                      Configured: {selectedAccount.pptTemplateFilename}
                     </span>
                   ) : (
                     <span className="text-warning font-semibold">No PPT template configured for this account.</span>
