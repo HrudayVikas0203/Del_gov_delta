@@ -1,4 +1,5 @@
 ﻿import json
+from contextlib import nullcontext
 from pathlib import Path
 from textwrap import shorten
 
@@ -21,6 +22,7 @@ from app.models.delivery import Account, Project
 from app.models.people import Employee
 from app.models.status import GeneratedReport, ReportFormat, WeeklyStatus
 from app.schemas.common import LLMSelection
+from app.services.template_storage import get_account_template_file
 
 
 BRAND_BLUE = "#1D4ED8"
@@ -357,7 +359,23 @@ def generate_report_file(db: Session, report_id: str, llm: LLMSelection | None =
     statuses = _status_rows(db, report, projects)
     path = _report_path(report)
     if report.report_format == ReportFormat.PPTX:
-        _generate_ppt(path, report, projects, statuses, db, llm)
+        account_id = _scope_value(report.scope, "account")
+        account_template = (
+            report.template
+            if account_id
+            and getattr(report, "template", None)
+            and report.template.account_id == account_id
+            and report.template.project_id is None
+            and report.template.file_type == "pptx"
+            else None
+        )
+        template_context = (
+            get_account_template_file(db, account_id, account_template.id)
+            if account_template
+            else nullcontext(None)
+        )
+        with template_context as template_path:
+            _generate_ppt(path, report, projects, statuses, db, llm, template_path)
     elif report.report_format == ReportFormat.PDF:
         _generate_pdf(path, report, projects, statuses, db, llm)
     else:
@@ -368,9 +386,9 @@ def generate_report_file(db: Session, report_id: str, llm: LLMSelection | None =
     return str(path)
 
 
-def _generate_ppt(path: Path, report: GeneratedReport, projects: list[Project], statuses: list[WeeklyStatus], db: Session, llm: LLMSelection | None = None) -> None:
-    base_template = report.template.file_path if getattr(report, "template", None) and report.template and report.template.file_type == "pptx" else None
-    prs = Presentation(base_template) if base_template and Path(base_template).exists() else Presentation()
+def _generate_ppt(path: Path, report: GeneratedReport, projects: list[Project], statuses: list[WeeklyStatus], db: Session, llm: LLMSelection | None = None, template_path: Path | None = None) -> None:
+    base_template = template_path
+    prs = Presentation(str(base_template)) if base_template else Presentation()
 
     if len(prs.slides) == 0:
         title = prs.slides.add_slide(prs.slide_layouts[0])

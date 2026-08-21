@@ -137,6 +137,8 @@ def upload_account_template(
     template.file_type = "pptx"
     template.content_type = file.content_type
     template.size_bytes = len(content)
+    template.content_bytes = content
+    template.uploaded_by_id = actor.id
     template.project_id = None
     audit(db, actor.id, "Account Template Updated", "Accounts", f"PPT template updated for account {account.name}")
     db.commit()

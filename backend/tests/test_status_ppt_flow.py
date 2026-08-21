@@ -1,6 +1,8 @@
 import os
+import tempfile
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("DATABASE_BACKEND", "sqlite")
 
@@ -192,7 +194,7 @@ def test_account_template_is_auto_selected_for_project_reports() -> None:
     assert project_resp.status_code == 201, project_resp.text
     project_id = project_resp.json()["id"]
 
-    template_path = Path("/tmp") / f"{uuid.uuid4().hex}.pptx"
+    template_path = Path(tempfile.gettempdir()) / f"{uuid.uuid4().hex}.pptx"
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[0])
     slide.shapes.title.text = "REPORT TITLE"
@@ -285,9 +287,9 @@ def test_account_template_replace_remove_and_project_isolation() -> None:
     project_a = create_project(account_a, f"Project A {uuid.uuid4().hex[:8]}")
     project_b = create_project(account_b, f"Project B {uuid.uuid4().hex[:8]}")
 
-    template_a = Path("/tmp") / f"template-a-{uuid.uuid4().hex}.pptx"
-    template_a_replacement = Path("/tmp") / f"template-a-replacement-{uuid.uuid4().hex}.pptx"
-    template_b = Path("/tmp") / f"template-b-{uuid.uuid4().hex}.pptx"
+    template_a = Path(tempfile.gettempdir()) / f"template-a-{uuid.uuid4().hex}.pptx"
+    template_a_replacement = Path(tempfile.gettempdir()) / f"template-a-replacement-{uuid.uuid4().hex}.pptx"
+    template_b = Path(tempfile.gettempdir()) / f"template-b-{uuid.uuid4().hex}.pptx"
     make_template(template_a, "A")
     make_template(template_a_replacement, "A-REPLACED")
     make_template(template_b, "B")
@@ -328,6 +330,77 @@ def test_account_template_replace_remove_and_project_isolation() -> None:
     account_response = client.get(f"/api/v1/governance/accounts/{account_a}", headers=headers)
     assert account_response.status_code == 200, account_response.text
     assert account_response.json()["ppt_template_status"] == "not_configured"
+
+
+def test_report_generation_retrieves_account_template_after_local_copy_is_removed(monkeypatch) -> None:
+    get_settings.cache_clear()
+    Base.metadata.create_all(bind=engine)
+    ensure_schema_upgrades()
+    seed()
+
+    client = TestClient(app)
+    login_resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "gowtham.rallabandi@delta.com", "password": "Demo@123"},
+    )
+    assert login_resp.status_code == 200, login_resp.text
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+    account_resp = client.post(
+        "/api/v1/governance/accounts",
+        json={"name": f"Restart Test {uuid.uuid4().hex[:8]}", "industry": "Finance", "country": "USA", "business_unit": "Banking"},
+        headers=headers,
+    )
+    assert account_resp.status_code == 201, account_resp.text
+    account_id = account_resp.json()["id"]
+
+    project_resp = client.post(
+        "/api/v1/governance/projects",
+        json={"account_id": account_id, "name": f"Restart Project {uuid.uuid4().hex[:8]}", "phase": "development", "client": "Restart Test"},
+        headers=headers,
+    )
+    assert project_resp.status_code == 201, project_resp.text
+    project_id = project_resp.json()["id"]
+
+    template_path = Path(tempfile.gettempdir()) / f"restart-template-{uuid.uuid4().hex}.pptx"
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slide.shapes.add_textbox(1.0, 1.0, 8.0, 1.0).text = "{{PROJECT_NAME}}"
+    prs.save(template_path)
+    with template_path.open("rb") as file_handle:
+        upload_resp = client.post(
+            f"/api/v1/governance/accounts/{account_id}/template",
+            files={"file": (template_path.name, file_handle, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+            headers=headers,
+        )
+    assert upload_resp.status_code == 201, upload_resp.text
+    template_id = upload_resp.json()["id"]
+
+    with SessionLocal() as db:
+        template = db.get(ReportTemplate, template_id)
+        assert template is not None
+        assert template.content_bytes
+        Path(template.file_path).unlink()
+
+    materialized_paths = []
+
+    def fake_map_template(path, *_args):
+        materialized_paths.append(Path(path))
+        assert materialized_paths[-1].exists()
+        return None, SimpleNamespace(slides=[])
+
+    monkeypatch.setattr("app.reports.generator.map_template", fake_map_template)
+    report_resp = client.post(
+        "/api/v1/reports",
+        json={"title": "Restart report", "report_type": "project_report", "report_format": "pptx", "scope": f"project:{project_id}", "project_id": project_id, "use_celery": False, "llm": {"provider": "gemini", "model": "gemini-3.5-flash"}},
+        headers=headers,
+    )
+    assert report_resp.status_code == 201, report_resp.text
+    report = report_resp.json()
+    assert report["template_id"] == template_id
+    assert len(materialized_paths) == 1
+    assert not materialized_paths[0].exists()
+    assert Presentation(report["file_path"]).slides
 
 
 def test_trimble_finance_ai_assistant_seed_data_exists() -> None:
