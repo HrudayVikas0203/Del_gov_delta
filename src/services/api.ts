@@ -4,6 +4,14 @@ const RAW_API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV
 const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
 const API_PATH_PREFIX = '/api/v1';
 
+// Diagnostic: Warn if API URL might not be optimal in production
+if (!import.meta.env.DEV && !import.meta.env.VITE_API_URL) {
+  console.warn(
+    'VITE_API_URL is not configured. API requests are using: ' + API_BASE_URL +
+    '\nFor production, consider setting VITE_API_URL to your backend URL directly.'
+  );
+}
+
 function buildUrl(path: string) {
   if (!path.startsWith('/')) {
     path = `/${path}`;

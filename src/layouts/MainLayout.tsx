@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Topbar from '../components/Topbar';
 import { useStore } from '../store/useStore';
@@ -8,7 +8,8 @@ import type { RoleCategory } from '../types';
 
 export default function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const { authToken, setEmployees, setAccounts, setProjects, setAllocations, setSubmissions, setAuthToken } = useStore();
+  const navigate = useNavigate();
+  const { authToken, logout, setEmployees, setAccounts, setProjects, setAllocations, setSubmissions } = useStore();
 
   useEffect(() => {
     async function loadData() {
@@ -127,7 +128,8 @@ export default function MainLayout() {
         console.error('Failed to load initial data:', err);
         const errorMsg = err instanceof Error ? err.message : String(err);
         if (errorMsg.includes('inactive') || errorMsg.includes('Invalid token') || errorMsg.includes('401')) {
-          setAuthToken(null);
+          logout();
+          navigate('/login', { replace: true });
         }
       }
     }

@@ -1,3 +1,5 @@
+import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -11,8 +13,10 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.people import Employee, Role
 
+logger = logging.getLogger(__name__)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+DEBUG_AUTH = os.getenv("DEBUG_AUTH", "").strip().lower() == "true"
 
 
 def hash_password(password: str) -> str:
@@ -32,15 +36,31 @@ def create_access_token(subject: str, claims: dict[str, Any] | None = None) -> s
 
 def decode_token(token: str) -> dict[str, Any]:
     try:
-        return jwt.decode(token, get_settings().secret_key, algorithms=["HS256"])
+        payload = jwt.decode(token, get_settings().secret_key, algorithms=["HS256"])
+        if DEBUG_AUTH:
+            logger.info("TOKEN_DECODE_SUCCESS sub=%s", payload.get("sub"))
+        return payload
+    except jwt.ExpiredSignatureError as exc:
+        if DEBUG_AUTH:
+            logger.warning("TOKEN_EXPIRED")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
     except jwt.PyJWTError as exc:
+        if DEBUG_AUTH:
+            logger.warning("TOKEN_DECODE_FAILED error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> Employee:
     payload = decode_token(token)
-    employee = db.get(Employee, payload.get("sub"))
-    if employee is None or not employee.is_active:
+    employee_id = payload.get("sub")
+    employee = db.get(Employee, employee_id)
+    if employee is None:
+        if DEBUG_AUTH:
+            logger.warning("USER_NOT_FOUND employee_id=%s", employee_id)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive or not found")
+    if not employee.is_active:
+        if DEBUG_AUTH:
+            logger.warning("USER_INACTIVE employee_id=%s", employee_id)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is inactive or not found")
     return employee
 
